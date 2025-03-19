@@ -102,7 +102,7 @@ def main():
         job_list.append(meta_agent.job.remote(weights_set, curr_episode))
 
     # initialize metric collector
-    metric_name = ['travel_dist', 'success_rate', 'explored_rate']
+    metric_name = ['travel_dist', 'success_rate', 'explored_rate', 'collision_count']
     training_data = []
     perf_metrics = {}
     for n in metric_name:
@@ -312,7 +312,7 @@ def write_to_tensor_board(writer, tensorboard_data, curr_episode):
     writer.add_scalar(tag='Perf/Travel Distance', scalar_value=travel_dist, global_step=curr_episode)
     writer.add_scalar(tag='Perf/Explored Rate', scalar_value=explored_rate, global_step=curr_episode)
     writer.add_scalar(tag='Perf/Success Rate', scalar_value=success_rate, global_step=curr_episode)
-
+    writer.add_scalar(tag='Perf/Collision Count', scalar_value=collision_count, global_step=curr_episode) 
 
 if __name__ == "__main__":
     main()

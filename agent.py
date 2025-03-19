@@ -189,10 +189,10 @@ class Agent:
         # 计算障碍物特征
         obstacle_features = self.get_obstacle_features(node_coords)
         
-        # 构建扩展后的节点特征 - 修复索引问题
+        # 构建扩展后的节点特征
         node_coords_relative = np.concatenate(
-            (node_coords[:, 0].reshape(-1, 1) - current_node[0],  # 使用current_node[0]而不是current_node_coords[0]
-             node_coords[:, 1].reshape(-1, 1) - current_node[1]), # 使用current_node[1]而不是current_node_coords[1]
+            (node_coords[:, 0].reshape(-1, 1) - current_node[0],  
+             node_coords[:, 1].reshape(-1, 1) - current_node[1]), 
             axis=-1) / UPDATING_MAP_SIZE
         
         node_utility = node_utility / (SENSOR_RANGE * 3.14 // FRONTIER_CELL_SIZE)
@@ -211,7 +211,7 @@ class Agent:
             self.device)
         node_padding_mask = torch.cat((node_padding_mask, node_padding), dim=-1)
 
-        # 修复变量名冲突，使用self.current_index
+        # 
         current_index_tensor = torch.tensor([self.current_index]).reshape(1, 1, 1).to(self.device)
 
         edge_mask = torch.tensor(self.adjacent_matrix).unsqueeze(0).to(self.device)
