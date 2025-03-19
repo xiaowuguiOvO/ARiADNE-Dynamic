@@ -25,9 +25,11 @@ def main():
     # use GPU/CPU for driver/worker
     device = torch.device('cuda') if USE_GPU_GLOBAL else torch.device('cpu')
     local_device = torch.device('cuda') if USE_GPU else torch.device('cpu')
-
+    print("Device: ", device)
     # initialize neural networks
-    global_policy_net = PolicyNet(NODE_INPUT_DIM, EMBEDDING_DIM).to(device)
+    policy_net = PolicyNet(NODE_INPUT_DIM, EMBEDDING_DIM)
+    global_policy_net = policy_net.to(device)
+    print("global_policy_net: ", global_policy_net)
     global_q_net1 = QNet(NODE_INPUT_DIM, EMBEDDING_DIM).to(device)
     global_q_net2 = QNet(NODE_INPUT_DIM, EMBEDDING_DIM).to(device)
     log_alpha = torch.FloatTensor([-2]).to(device)
@@ -48,6 +50,7 @@ def main():
     curr_episode = 0
     target_q_update_counter = 1
 
+    # print("entropy_target: ", entropy_target)
     # load model and optimizer trained before
     if LOAD_MODEL:
         print('Loading Model...')
@@ -111,6 +114,7 @@ def main():
         experience_buffer.append([])
 
     # collect data from worker and do training
+    print("Starting training")
     try:
         while True:
             # wait for any job to be completed

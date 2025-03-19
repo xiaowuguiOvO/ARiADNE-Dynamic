@@ -31,13 +31,14 @@ UPDATING_MAP_SIZE = 4 * SENSOR_RANGE + 4 * NODE_RESOLUTION  # nodes outside this
 MAX_EPISODE_STEP = 128
 REPLAY_SIZE = 10000
 MINIMUM_BUFFER_SIZE = 2000
-BATCH_SIZE = 128
+BATCH_SIZE = 64
 LR = 1e-5
 GAMMA = 1
-NUM_META_AGENT = 16  # how many threads does your CPU have
+NUM_META_AGENT = 4  # how many threads does your CPU have
 
 # network parameters
-NODE_INPUT_DIM = 4
+# NODE_INPUT_DIM = 4
+NODE_INPUT_DIM = 7  # 增加3个维度：最近障碍物距离、障碍物方向x、障碍物方向y
 EMBEDDING_DIM = 128
 
 # Graph parameters
@@ -49,3 +50,11 @@ USE_GPU = False  # do you want to collect training data using GPUs (better not)
 USE_GPU_GLOBAL = True  # do you want to train the network using GPUs
 NUM_GPU = 0  # 0 unless you want to collect data using GPUs
 
+# 动态障碍物参数
+NUM_DYNAMIC_OBSTACLES = 10      # 动态障碍物数量
+MAX_OBSTACLE_SPEED = 30.0       # 
+OBSTACLE_RADIUS = 0.4          # 障碍物半径 (m)
+ROBOT_RADIUS = 0.3             # 机器人半径 (m)
+COLLISION_PENALTY = 10.0       # 碰撞惩罚
+SAFE_DISTANCE = 1.5            # 安全距离 (m)
+PROXIMITY_PENALTY = 3.0        # 接近惩罚系数

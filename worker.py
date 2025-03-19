@@ -18,7 +18,7 @@ class Worker:
 
         self.env = Env(global_step, plot=self.save_image)
         self.robot = Agent(policy_net, self.device, self.save_image)
-
+        self.robot.env = self.env
         self.episode_buffer = []
         self.perf_metrics = dict()
         for i in range(15):
@@ -67,6 +67,7 @@ class Worker:
         self.perf_metrics['travel_dist'] = self.env.travel_dist
         self.perf_metrics['explored_rate'] = self.env.explored_rate
         self.perf_metrics['success_rate'] = done
+        self.perf_metrics['collision_count'] = self.env.collision_count
 
         # save gif
         if self.save_image:
