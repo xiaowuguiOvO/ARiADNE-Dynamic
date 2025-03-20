@@ -38,7 +38,7 @@ NUM_META_AGENT = 4  # how many threads does your CPU have
 
 # network parameters
 # NODE_INPUT_DIM = 4
-NODE_INPUT_DIM = 7  # 增加3个维度：最近障碍物距离、障碍物方向x、障碍物方向y
+NODE_INPUT_DIM = 6  #node_x, node_y, node_utility, node_guidepost, obstacle_velocity_x, obstacle_velocity_y
 EMBEDDING_DIM = 128
 
 # Graph parameters
@@ -52,9 +52,13 @@ NUM_GPU = 0  # 0 unless you want to collect data using GPUs
 
 # 动态障碍物参数
 NUM_DYNAMIC_OBSTACLES = 10      # 动态障碍物数量
-MAX_OBSTACLE_SPEED = 30.0       # 
+MIN_OBSTACLE_SPEED = 5      # 最小障碍物速度
+MAX_OBSTACLE_SPEED = 30.0       # 最大障碍物速度
 OBSTACLE_RADIUS = 0.4          # 障碍物半径 (m)
 ROBOT_RADIUS = 0.3             # 机器人半径 (m)
 COLLISION_PENALTY = 10.0       # 碰撞惩罚
 SAFE_DISTANCE = 1.5            # 安全距离 (m)
 PROXIMITY_PENALTY = 3.0        # 接近惩罚系数
+
+OBSTACLE_CURVE_MIN_DIST = 5  # 最小障碍物轨迹距离
+OBSTACLE_CURVE_MAX_DIST = 20  # 最大障碍物轨迹距离

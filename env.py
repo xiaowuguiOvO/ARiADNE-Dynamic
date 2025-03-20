@@ -73,11 +73,11 @@ class Env:
                         y1 * self.cell_size + self.belief_origin_y
                     ])
                     
-                    # 在第一个点附近找第二个点(限制距离范围,使路径合理)
-                    nearby_cells = []
-                    min_dist = 10.0 / self.cell_size  # 增加最小距离到10米
-                    max_dist = 15.0 / self.cell_size  # 增加最大距离到15米
+                    # 随机选择轨迹距离
+                    min_dist = np.random.uniform(OBSTACLE_CURVE_MIN_DIST, OBSTACLE_CURVE_MAX_DIST) / self.cell_size
+                    max_dist = min_dist + 5.0 / self.cell_size  # 增加一个小范围以确保合理性
                     
+                    nearby_cells = []
                     for j, (y2, x2) in enumerate(free_cells):
                         dist = np.linalg.norm([y2-y1, x2-x1])
                         if min_dist < dist < max_dist:
@@ -97,7 +97,7 @@ class Env:
                 if valid_path:  # 只有找到有效路径才创建障碍物
                     # 计算初始位置和速度
                     direction = pos2 - pos1
-                    speed = MAX_OBSTACLE_SPEED
+                    speed = np.random.uniform(MIN_OBSTACLE_SPEED, MAX_OBSTACLE_SPEED)  # 随机速度
                     velocity = direction / np.linalg.norm(direction) * speed
                     
                     obstacle = {
@@ -291,31 +291,31 @@ class Env:
                 (np.array(self.trajectory_y) - self.belief_origin_y) / self.cell_size, 
                 'b', linewidth=2, zorder=1)
         
-        # 绘制动态障碍物 - 使用绿色而不是红色
+        # 绘制动态障碍物 - 使用更明显的颜色和更大的尺寸
         for obs in self.dynamic_obstacles:
             # 转换障碍物位置到栅格坐标
             x = (obs['position'][0] - self.belief_origin_x) / self.cell_size
             y = (obs['position'][1] - self.belief_origin_y) / self.cell_size
             
-            # 画出障碍物的圆形范围 - 改为绿色
-            circle = plt.Circle((x, y), OBSTACLE_RADIUS/self.cell_size, 
-                            color='green', alpha=0.5, zorder=4)
+            # 画出障碍物的圆形范围 - 使用更明显的颜色和更大的半径
+            circle = plt.Circle((x, y), OBSTACLE_RADIUS * 1.5 / self.cell_size,  # 增加半径
+                                color='red', alpha=0.7, zorder=4)  # 使用红色
             plt.gca().add_patch(circle)
             
-            # 画出障碍物的运动路径 - 改为绿色虚线
+            # 画出障碍物的运动路径 - 使用红色虚线
             path_x = [(obs['waypoint1'][0] - self.belief_origin_x) / self.cell_size,
                     (obs['waypoint2'][0] - self.belief_origin_x) / self.cell_size]
             path_y = [(obs['waypoint1'][1] - self.belief_origin_y) / self.cell_size,
                     (obs['waypoint2'][1] - self.belief_origin_y) / self.cell_size]
-            plt.plot(path_x, path_y, 'g--', alpha=0.3, zorder=2)  # 绿色虚线表示运动路径
+            plt.plot(path_x, path_y, 'r--', alpha=0.5, zorder=2)  # 红色虚线表示运动路径
             
-            # 画出运动方向箭头 - 改为绿色
+            # 画出运动方向箭头 - 使用红色
             # arrow_length = 2.0  # 箭头长度缩放因子
             # dx = obs['velocity'][0] * arrow_length / self.cell_size
             # dy = obs['velocity'][1] * arrow_length / self.cell_size
             # plt.arrow(x, y, dx, dy, 
-            #         head_width=0.3, head_length=0.5, 
-            #         fc='green', ec='green', alpha=0.7, zorder=4)
+            #           head_width=0.3, head_length=0.5, 
+            #           fc='red', ec='red', alpha=0.7, zorder=4)
         
         # 更新标题，添加碰撞计数
         plt.suptitle('Explored: {:.4g}  Distance: {:.4g}  Collisions: {}'.format(

@@ -39,6 +39,9 @@ class Agent:
         self.node_coords, self.utility, self.guidepost = None, None, None
         self.current_index, self.adjacent_matrix, self.neighbor_indices = None, None, None
 
+        # 动态障碍物
+        self.obstacle_velocities = None
+
     def update_map(self, map_info):
         # no need in training because of shallow copy
         self.map_info = map_info
@@ -114,7 +117,7 @@ class Agent:
                                        self.frontier,
                                        self.updating_map_info,
                                        self.map_info)
-        self.node_coords, self.utility, self.guidepost, self.adjacent_matrix, self.current_index, self.neighbor_indices = \
+        self.node_coords, self.utility, self.guidepost, self.adjacent_matrix, self.current_index, self.neighbor_indices, self.obstacle_velocities = \
             self.update_observation()
 
     def update_observation(self):
@@ -128,6 +131,8 @@ class Agent:
         n_nodes = all_node_coords.shape[0]
         adjacent_matrix = np.ones((n_nodes, n_nodes)).astype(int)
         node_coords_to_check = all_node_coords[:, 0] + all_node_coords[:, 1] * 1j
+        obstacle_velocities = np.zeros((n_nodes, 2))  # 默认值为 (0, 0)
+
         for i, coords in enumerate(all_node_coords):
             node = self.node_manager.nodes_dict.find((coords[0], coords[1])).data
             utility.append(node.utility)
@@ -137,13 +142,28 @@ class Agent:
                 assert index is not None
                 index = index[0][0]
                 adjacent_matrix[i, index] = 0
+            
+        # 遍历动态障碍物
+        if hasattr(self, 'env') and hasattr(self.env, 'dynamic_obstacles'):
+            for obs in self.env.dynamic_obstacles:
+                obs_pos = obs['position']
+                obs_vel = obs['velocity']
+                # 计算障碍物与智能体的距离
+                distance_to_agent = np.linalg.norm(self.location - obs_pos)
+                # 找到最近的节点
+                distances_to_nodes = np.linalg.norm(all_node_coords - obs_pos, axis=1)
+                closest_node_index = np.argmin(distances_to_nodes)
+                # 检查障碍物是否在 SENSOR 范围内
+                if distance_to_agent <= SENSOR_RANGE:
+                    obstacle_velocities[closest_node_index] = obs_vel
+
 
         utility = np.array(utility)
         guidepost = np.array(guidepost)
 
         current_index = np.argwhere(node_coords_to_check == self.location[0] + self.location[1] * 1j)[0][0]
         neighbor_indices = np.argwhere(adjacent_matrix[current_index] == 0).reshape(-1)
-        return all_node_coords, utility, guidepost, adjacent_matrix, current_index, neighbor_indices
+        return all_node_coords, utility, guidepost, adjacent_matrix, current_index, neighbor_indices, obstacle_velocities
 
     def get_obstacle_features(self, node_coords):
         """计算每个节点的障碍物特征"""
@@ -179,27 +199,21 @@ class Agent:
         return obstacle_features
 
     def get_observation(self):
-        # 获取原有特征
-        n_node = len(self.node_coords)
-        current_node = self.node_coords[self.current_index]  # 不要reshape，保持原始形状
-        node_coords = self.node_coords.copy()
-        node_utility = self.utility.copy().reshape(-1, 1)
-        node_guidepost = self.guidepost.copy().reshape(-1, 1)
-        
-        # 计算障碍物特征
-        obstacle_features = self.get_obstacle_features(node_coords)
-        
-        # 构建扩展后的节点特征
-        node_coords_relative = np.concatenate(
-            (node_coords[:, 0].reshape(-1, 1) - current_node[0],  
-             node_coords[:, 1].reshape(-1, 1) - current_node[1]), 
-            axis=-1) / UPDATING_MAP_SIZE
-        
+        node_coords = self.node_coords
+        node_utility = self.utility.reshape(-1, 1)
+        node_guidepost = self.guidepost.reshape(-1, 1)
+        current_index = self.current_index
+        edge_mask = self.adjacent_matrix
+        current_edge = self.neighbor_indices
+        n_node = node_coords.shape[0]
+
+        current_node_coords = node_coords[self.current_index]
+        node_coords = np.concatenate((node_coords[:, 0].reshape(-1, 1) - current_node_coords[0],
+                                            node_coords[:, 1].reshape(-1, 1) - current_node_coords[1]),
+                                           axis=-1) / UPDATING_MAP_SIZE
         node_utility = node_utility / (SENSOR_RANGE * 3.14 // FRONTIER_CELL_SIZE)
-        
-        # 合并所有特征
-        node_inputs = np.concatenate((node_coords_relative, node_utility, node_guidepost, obstacle_features), axis=1)
-        
+        obstacle_velocities = self.obstacle_velocities
+        node_inputs = np.concatenate((node_coords, node_utility, node_guidepost, obstacle_velocities), axis=1)
         node_inputs = torch.FloatTensor(node_inputs).unsqueeze(0).to(self.device)
 
         assert node_coords.shape[0] < NODE_PADDING_SIZE, print(node_coords.shape[0], NODE_PADDING_SIZE)
@@ -211,17 +225,16 @@ class Agent:
             self.device)
         node_padding_mask = torch.cat((node_padding_mask, node_padding), dim=-1)
 
-        # 
-        current_index_tensor = torch.tensor([self.current_index]).reshape(1, 1, 1).to(self.device)
+        current_index = torch.tensor([current_index]).reshape(1, 1, 1).to(self.device)
 
-        edge_mask = torch.tensor(self.adjacent_matrix).unsqueeze(0).to(self.device)
+        edge_mask = torch.tensor(edge_mask).unsqueeze(0).to(self.device)
 
         padding = torch.nn.ConstantPad2d(
             (0, NODE_PADDING_SIZE - n_node, 0, NODE_PADDING_SIZE - n_node), 1)
         edge_mask = padding(edge_mask)
 
-        current_in_edge = np.argwhere(self.neighbor_indices == self.current_index)[0][0]
-        current_edge = torch.tensor(self.neighbor_indices).unsqueeze(0)
+        current_in_edge = np.argwhere(current_edge == self.current_index)[0][0]
+        current_edge = torch.tensor(current_edge).unsqueeze(0)
         k_size = current_edge.size()[-1]
         padding = torch.nn.ConstantPad1d((0, K_SIZE - k_size), 0)
         current_edge = padding(current_edge)
@@ -232,7 +245,7 @@ class Agent:
         padding = torch.nn.ConstantPad1d((0, K_SIZE - k_size), 1)
         edge_padding_mask = padding(edge_padding_mask)
 
-        return [node_inputs, node_padding_mask, edge_mask, current_index_tensor, current_edge, edge_padding_mask]
+        return [node_inputs, node_padding_mask, edge_mask, current_index, current_edge, edge_padding_mask]
 
     def select_next_waypoint(self, observation):
         _, _, _, _, current_edge, _ = observation
@@ -262,31 +275,31 @@ class Agent:
             plt.text(node[0], node[1], str(utility), zorder=3)
         plt.plot(robot[0], robot[1], 'mo', markersize=16, zorder=5)
         
-                # 添加动态障碍物到中间子图
+        # 添加动态障碍物到中间子图
         if hasattr(self, 'env') and hasattr(self.env, 'dynamic_obstacles'):
             for obs in self.env.dynamic_obstacles:
                 # 转换障碍物位置到栅格坐标
                 cell_x = int((obs['position'][0] - self.map_info.map_origin_x) / self.map_info.cell_size)
                 cell_y = int((obs['position'][1] - self.map_info.map_origin_y) / self.map_info.cell_size)
                 
-                # 画出障碍物圆形
-                circle = plt.Circle((cell_x, cell_y), OBSTACLE_RADIUS/self.cell_size, 
-                                  color='green', alpha=0.5, zorder=4)
+                # 画出障碍物圆形 - 使用更明显的颜色和更大的尺寸
+                circle = plt.Circle((cell_x, cell_y), OBSTACLE_RADIUS * 1.5 / self.cell_size,  # 增加半径
+                                    color='red', alpha=0.7, zorder=4)  # 使用红色
                 plt.gca().add_patch(circle)
                 
-                # 画出障碍物路径
+                # 画出障碍物路径 - 使用红色虚线
                 path_x = [int((obs['waypoint1'][0] - self.map_info.map_origin_x) / self.map_info.cell_size),
-                         int((obs['waypoint2'][0] - self.map_info.map_origin_x) / self.map_info.cell_size)]
+                        int((obs['waypoint2'][0] - self.map_info.map_origin_x) / self.map_info.cell_size)]
                 path_y = [int((obs['waypoint1'][1] - self.map_info.map_origin_y) / self.map_info.cell_size),
-                         int((obs['waypoint2'][1] - self.map_info.map_origin_y) / self.map_info.cell_size)]
-                plt.plot(path_x, path_y, 'g--', alpha=0.3, zorder=2)
+                        int((obs['waypoint2'][1] - self.map_info.map_origin_y) / self.map_info.cell_size)]
+                plt.plot(path_x, path_y, 'r--', alpha=0.5, zorder=2)  # 红色虚线表示运动路径
                 
         for coords in self.node_coords:
             node = self.node_manager.nodes_dict.find(coords.tolist()).data
             for neighbor_coords in node.neighbor_set:
                 end = (np.array(neighbor_coords) - coords) / 2 + coords
                 plt.plot((np.array([coords[0], end[0]]) - self.map_info.map_origin_x) / self.cell_size,
-                               (np.array([coords[1], end[1]]) - self.map_info.map_origin_y) / self.cell_size, 'tan', zorder=1)
+                        (np.array([coords[1], end[1]]) - self.map_info.map_origin_y) / self.cell_size, 'tan', zorder=1)
 
         plt.subplot(1, 3, 3)
         plt.imshow(self.map_info.map, cmap='gray')
@@ -294,7 +307,6 @@ class Agent:
         plt.scatter(nodes[:, 0], nodes[:, 1], c=self.guidepost, zorder=2)
         plt.plot(robot[0], robot[1], 'mo', markersize=16, zorder=5)
 
-        
         # 添加动态障碍物到右侧子图
         if hasattr(self, 'env') and hasattr(self.env, 'dynamic_obstacles'):
             for obs in self.env.dynamic_obstacles:
@@ -302,7 +314,7 @@ class Agent:
                 cell_x = int((obs['position'][0] - self.map_info.map_origin_x) / self.map_info.cell_size)
                 cell_y = int((obs['position'][1] - self.map_info.map_origin_y) / self.map_info.cell_size)
                 
-                # 画出障碍物圆形
-                circle = plt.Circle((cell_x, cell_y), OBSTACLE_RADIUS/self.cell_size, 
-                                  color='green', alpha=0.5, zorder=4)
+                # 画出障碍物圆形 - 使用更明显的颜色和更大的尺寸
+                circle = plt.Circle((cell_x, cell_y), OBSTACLE_RADIUS * 1.5 / self.cell_size,  # 增加半径
+                                    color='red', alpha=0.7, zorder=4)  # 使用红色
                 plt.gca().add_patch(circle)

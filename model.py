@@ -207,52 +207,24 @@ class Decoder(nn.Module):
 class PolicyNet(nn.Module):
     def __init__(self, node_dim, embedding_dim):
         super(PolicyNet, self).__init__()
-        
-        # 我们有两种选择处理特征：
-        # 1. 分别处理基本特征和障碍物特征
-        # 2. 直接处理整个输入特征
-        
-        # 方案1：分别处理
-        self.basic_embedding = nn.Linear(4, embedding_dim)  # 处理基本特征
-        self.obstacle_encoder = nn.Sequential(
-            nn.Linear(3, embedding_dim // 4),
-            nn.ReLU()
-        )
-        self.feature_merger = nn.Linear(embedding_dim + embedding_dim // 4, embedding_dim)
-        
-        # 方案2：直接处理（作为备选）
+
+        # local graph encoder
         self.initial_embedding = nn.Linear(node_dim, embedding_dim)
-        
-        # 其他层保持不变
         self.encoder = Encoder(embedding_dim=embedding_dim, n_head=8, n_layer=6)
+
+        # decoder
         self.decoder = Decoder(embedding_dim=embedding_dim, n_head=8, n_layer=1)
         self.current_embedding = nn.Linear(embedding_dim * 2, embedding_dim)
+
+        # pointer
         self.pointer = SingleHeadAttention(embedding_dim)
 
     def encode_graph(self, node_inputs, node_padding_mask, edge_mask):
-        # 检查输入维度
-        input_dim = node_inputs.size(2)
-        
-        if input_dim >= 7:  # 如果包含障碍物特征
-            # 分离基本特征和障碍物特征
-            basic_features = node_inputs[:, :, :4]  # 前4个维度是原始特征
-            obstacle_features = node_inputs[:, :, 4:7]  # 障碍物特征
-            
-            # 分别处理，使用正确的网络
-            basic_embedding = self.basic_embedding(basic_features)
-            obstacle_embedding = self.obstacle_encoder(obstacle_features)
-            
-            # 合并特征
-            merged_features = torch.cat([basic_embedding, obstacle_embedding], dim=-1)
-            node_feature = self.feature_merger(merged_features)
-        else:
-            # 向后兼容旧模型
-            node_feature = self.initial_embedding(node_inputs)
-        
+        node_feature = self.initial_embedding(node_inputs)
         enhanced_node_feature = self.encoder(src=node_feature,
-                                           key_padding_mask=node_padding_mask,
-                                           attn_mask=edge_mask)
-        
+                                                         key_padding_mask=node_padding_mask,
+                                                         attn_mask=edge_mask)
+
         return enhanced_node_feature
 
     def decode_state(self, enhanced_node_feature, current_index, node_padding_mask):
@@ -289,6 +261,7 @@ class PolicyNet(nn.Module):
                                   enhanced_node_feature, current_edge, edge_padding_mask)
 
         return logp
+
 
 
 class QNet(nn.Module):
