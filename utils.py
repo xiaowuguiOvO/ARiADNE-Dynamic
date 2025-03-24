@@ -207,7 +207,7 @@ def make_gif(path, n, frame_files, rate):
         for frame in frame_files:
             image = imageio.imread(frame)
             writer.append_data(image)
-    print('gif complete\n')
+    print('gif exploration_rate: {:.4g} complete\n'.format(rate))
 
     # Remove files
     for filename in frame_files[:-1]:

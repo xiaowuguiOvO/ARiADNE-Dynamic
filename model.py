@@ -208,16 +208,19 @@ class PolicyNet(nn.Module):
     def __init__(self, node_dim, embedding_dim):
         super(PolicyNet, self).__init__()
 
-        # local graph encoder
+        # 保留原有编码器部分
         self.initial_embedding = nn.Linear(node_dim, embedding_dim)
         self.encoder = Encoder(embedding_dim=embedding_dim, n_head=8, n_layer=6)
-
-        # decoder
         self.decoder = Decoder(embedding_dim=embedding_dim, n_head=8, n_layer=1)
         self.current_embedding = nn.Linear(embedding_dim * 2, embedding_dim)
+        
+        # 用于速度输出的新层，移除原来的pointer
+        self.velocity_predictor = nn.Sequential(
+            nn.Linear(embedding_dim, 64),
+            nn.ReLU(),
+            nn.Linear(64, 2)  # 输出2维速度 [vx, vy]
+        )
 
-        # pointer
-        self.pointer = SingleHeadAttention(embedding_dim)
 
     def encode_graph(self, node_inputs, node_padding_mask, edge_mask):
         node_feature = self.initial_embedding(node_inputs)
@@ -257,10 +260,15 @@ class PolicyNet(nn.Module):
         enhanced_node_feature = self.encode_graph(node_inputs, node_padding_mask, edge_mask)
         current_node_feature, enhanced_current_node_feature = self.decode_state(
             enhanced_node_feature, current_index, node_padding_mask)
-        logp = self.output_policy(current_node_feature, enhanced_current_node_feature,
-                                  enhanced_node_feature, current_edge, edge_padding_mask)
-
-        return logp
+            
+        # 使用当前状态特征预测速度
+        current_state_feature = self.current_embedding(torch.cat((enhanced_current_node_feature,
+                                                                current_node_feature), dim=-1))
+        
+        # 输出速度而非logp
+        velocity = self.velocity_predictor(current_state_feature.squeeze(1))
+        
+        return velocity
 
 
 

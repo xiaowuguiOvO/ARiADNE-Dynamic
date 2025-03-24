@@ -41,6 +41,10 @@ class Agent:
 
         # 动态障碍物
         self.obstacle_velocities = None
+        # 自身速度
+        self.velocity = np.array([0.0, 0.0])  # 当前速度
+        self.nearest_node = None
+        self.nearest_node_index = float('inf')
 
     def update_map(self, map_info):
         # no need in training because of shallow copy
@@ -56,6 +60,41 @@ class Agent:
             pass
         else:
             node.data.set_visited()
+
+    def update_nearest_node(self):
+        """更新与当前位置最接近的节点"""
+        if self.location is None:
+            return False
+            
+        # 检查四叉树是否为空
+        if len(self.node_manager.nodes_dict) == 0:
+            print("警告：四叉树为空，无法找到最近节点")
+            return False
+            
+        try:
+            # 使用四叉树的nearest_neighbors方法
+            nearest_node = self.node_manager.nodes_dict.nearest_neighbors(
+                self.location.tolist(), count=1)
+                
+            if nearest_node and len(nearest_node) > 0:
+                # 更新最近节点
+                self.nearest_node = nearest_node[0]
+                
+                # 计算距离
+                node_pos = np.array([self.nearest_node.x, self.nearest_node.y])
+                self.nearest_node_distance = np.linalg.norm(self.location - node_pos)
+                
+                # 可选：标记节点为已访问
+                if hasattr(self.nearest_node, 'data') and self.nearest_node.data is not None:
+                    self.nearest_node.data.set_visited()
+                    
+                return True
+            else:
+                print("未找到任何最近节点")
+        except Exception as e:
+            print(f"更新最近节点时出错: {e}")
+            
+        return False
 
     def update_frontiers(self):
         self.frontier = get_frontier_in_map(self.updating_map_info)
@@ -111,9 +150,29 @@ class Agent:
     def update_planning_state(self, global_map_info, location):
         self.update_map(global_map_info)
         self.update_location(location)
+        # self.location = location
+        # self.update_nearest_node()
         self.update_updating_map(self.location)
         self.update_frontiers()
         self.node_manager.update_graph(self.location,
+                                       self.frontier,
+                                       self.updating_map_info,
+                                       self.map_info)
+        node = self.node_manager.nodes_dict.find(location.tolist())
+        if node is not None:
+            node.data.set_visited()
+        self.node_coords, self.utility, self.guidepost, self.adjacent_matrix, self.current_index, self.neighbor_indices, self.obstacle_velocities = \
+            self.update_observation()
+            
+    def update_planning_state_use_nearest_node(self, global_map_info, location):
+        self.update_map(global_map_info)
+        # self.update_location(location)
+        self.location = location
+        self.update_nearest_node()
+        nearest_node_location = np.array([self.nearest_node.x, self.nearest_node.y])
+        self.update_updating_map(nearest_node_location)
+        self.update_frontiers()
+        self.node_manager.update_graph(nearest_node_location,
                                        self.frontier,
                                        self.updating_map_info,
                                        self.map_info)
@@ -161,42 +220,46 @@ class Agent:
         utility = np.array(utility)
         guidepost = np.array(guidepost)
 
-        current_index = np.argwhere(node_coords_to_check == self.location[0] + self.location[1] * 1j)[0][0]
+        # current_index = np.argwhere(node_coords_to_check == self.location[0] + self.location[1] * 1j)[0][0]
+        if self.nearest_node is not None:
+            current_index = np.argwhere(node_coords_to_check == self.nearest_node.x + self.nearest_node.y * 1j)[0][0]
+        else:
+            current_index = np.argwhere(node_coords_to_check == self.location[0] + self.location[1] * 1j)[0][0]
         neighbor_indices = np.argwhere(adjacent_matrix[current_index] == 0).reshape(-1)
         return all_node_coords, utility, guidepost, adjacent_matrix, current_index, neighbor_indices, obstacle_velocities
 
-    def get_obstacle_features(self, node_coords):
-        """计算每个节点的障碍物特征"""
-        n_node = len(node_coords)
-        # 初始化障碍物特征：[最近距离, 相对方向x, 相对方向y]
-        obstacle_features = np.ones((n_node, 3)) * 999  # 默认值设为大数字
+    # def get_obstacle_features(self, node_coords):
+    #     """计算每个节点的障碍物特征"""
+    #     n_node = len(node_coords)
+    #     # 初始化障碍物特征：[最近距离, 相对方向x, 相对方向y]
+    #     obstacle_features = np.ones((n_node, 3)) * 999  # 默认值设为大数字
         
-        if not hasattr(self, 'env') or not hasattr(self.env, 'dynamic_obstacles') or len(self.env.dynamic_obstacles) == 0:
-            return obstacle_features
+    #     if not hasattr(self, 'env') or not hasattr(self.env, 'dynamic_obstacles') or len(self.env.dynamic_obstacles) == 0:
+    #         return obstacle_features
         
-        # 计算每个节点的障碍物特征
-        for i, node_coord in enumerate(node_coords):
-            min_dist = float('inf')
-            closest_obs_vel = np.array([0.0, 0.0])
+    #     # 计算每个节点的障碍物特征
+    #     for i, node_coord in enumerate(node_coords):
+    #         min_dist = float('inf')
+    #         closest_obs_vel = np.array([0.0, 0.0])
             
-            for obs in self.env.dynamic_obstacles:
-                dist = np.linalg.norm(node_coord - obs['position'])
+    #         for obs in self.env.dynamic_obstacles:
+    #             dist = np.linalg.norm(node_coord - obs['position'])
                 
-                # 更新最近障碍物信息
-                if dist < min_dist:
-                    min_dist = dist
-                    closest_obs_vel = obs['velocity']
+    #             # 更新最近障碍物信息
+    #             if dist < min_dist:
+    #                 min_dist = dist
+    #                 closest_obs_vel = obs['velocity']
                     
-            # 归一化
-            if min_dist < UPDATING_MAP_SIZE:
-                obstacle_features[i, 0] = min_dist / UPDATING_MAP_SIZE  # 归一化距离
-                # 如果有最近的障碍物，记录其速度方向
-                vel_norm = np.linalg.norm(closest_obs_vel)
-                if vel_norm > 0:
-                    obstacle_features[i, 1] = closest_obs_vel[0] / vel_norm  # 归一化x方向
-                    obstacle_features[i, 2] = closest_obs_vel[1] / vel_norm  # 归一化y方向
+    #         # 归一化
+    #         if min_dist < UPDATING_MAP_SIZE:
+    #             obstacle_features[i, 0] = min_dist / UPDATING_MAP_SIZE  # 归一化距离
+    #             # 如果有最近的障碍物，记录其速度方向
+    #             vel_norm = np.linalg.norm(closest_obs_vel)
+    #             if vel_norm > 0:
+    #                 obstacle_features[i, 1] = closest_obs_vel[0] / vel_norm  # 归一化x方向
+    #                 obstacle_features[i, 2] = closest_obs_vel[1] / vel_norm  # 归一化y方向
         
-        return obstacle_features
+    #     return obstacle_features
 
     def get_observation(self):
         node_coords = self.node_coords
@@ -212,6 +275,7 @@ class Agent:
                                             node_coords[:, 1].reshape(-1, 1) - current_node_coords[1]),
                                            axis=-1) / UPDATING_MAP_SIZE
         node_utility = node_utility / (SENSOR_RANGE * 3.14 // FRONTIER_CELL_SIZE)
+        # 障碍物速度
         obstacle_velocities = self.obstacle_velocities
         node_inputs = np.concatenate((node_coords, node_utility, node_guidepost, obstacle_velocities), axis=1)
         node_inputs = torch.FloatTensor(node_inputs).unsqueeze(0).to(self.device)
@@ -257,7 +321,19 @@ class Agent:
         next_position = self.node_coords[next_node_index]
 
         return next_position, action_index
-
+    
+    def cal_next_velocity(self, observation):
+        _, _, _, _, current_edge, _ = observation
+        with torch.no_grad():
+            velocity_tensor = self.policy_net(*observation)
+            
+        # 转换为numpy数组
+        if isinstance(velocity_tensor, torch.Tensor):
+            velocity = velocity_tensor.cpu().numpy().squeeze()
+        else:
+            velocity = velocity_tensor
+            
+        return velocity
     def plot_env(self):
         plt.switch_backend('agg')
 

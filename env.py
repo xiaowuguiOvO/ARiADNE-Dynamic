@@ -16,8 +16,8 @@ class Env:
         self.ground_truth_size = np.shape(self.ground_truth)  # cell
         self.cell_size = CELL_SIZE  # meter
 
+        self.agent = None
         self.robot_location = np.array([0.0, 0.0])  # meter
-
         self.robot_belief = np.ones(self.ground_truth_size) * 127
         self.belief_origin_x = -np.round(self.robot_cell[0] * self.cell_size, 1)   # meter
         self.belief_origin_y = -np.round(self.robot_cell[1] * self.cell_size, 1)  # meter
@@ -43,6 +43,14 @@ class Env:
         self.dynamic_obstacles = []
         self.collision_count = 0
         self.init_dynamic_obstacles()
+
+        self.step_size = STEP_SIZE
+        self.decision_interval = DECISION_INTERVAL
+        self.decision_distance = DECISION_DISTANCE
+        self.distance_since_last_decision = 0.0
+        self.time_since_last_decision = 0.0
+    def set_agent(self, agent):
+        self.agent = agent
 
     def init_dynamic_obstacles(self):
         """在自由空间中随机放置动态障碍物,每个障碍物在两点之间往返运动"""
@@ -243,24 +251,104 @@ class Env:
                 return True
         return False
     
-    def step(self, next_waypoint):
-        dist = np.linalg.norm(self.robot_location - next_waypoint)
-        self.update_robot_location(next_waypoint)
-        self.update_robot_belief()
+    # def step(self, next_waypoint):
+    #     dist = np.linalg.norm(self.robot_location - next_waypoint)
+    #     self.update_robot_location(next_waypoint)
+    #     self.update_robot_belief()
 
-        # 更新动态障碍物
-        self.update_dynamic_obstacles()
+    #     # 更新动态障碍物
+    #     self.update_dynamic_obstacles()
+        
+    #     # 检查碰撞
+    #     collision = self.check_collision()
+        
+    #     self.travel_dist += dist
+    #     self.evaluate_exploration_rate()
+
+    #     # 将碰撞信息传递给奖励计算函数
+    #     reward = self.calculate_reward(dist, collision)
+
+    #     return reward
+    def step(self):
+        """
+        执行一个模拟步骤，使用agent的当前速度
+        返回:
+            reward: 奖励值
+            collision: 是否发生碰撞
+            need_decision: 是否需要做新决策
+        """
+        if self.agent is None:
+            raise ValueError("必须先使用set_agent设置代理")
+            
+        # 从agent获取当前速度
+        velocity_command = self.agent.velocity
+        
+        # 规范化速度命令到最大速度范围内
+        velocity_norm = np.linalg.norm(velocity_command)
+        if velocity_norm > MAX_ROBOT_SPEED and velocity_norm > 0:
+            velocity_command = velocity_command / velocity_norm * MAX_ROBOT_SPEED
+            
+        # 记录总移动距离和是否碰撞
+        total_dist = 0.0
+        collision = False
+        need_decision = False
+        
+        # 计算当前步骤移动距离
+        step_distance = np.linalg.norm(velocity_command) * self.step_size
+        
+        # 如果速度非零，移动机器人
+        if step_distance > 1e-6:
+            # 更新位置
+            old_location = self.robot_location.copy()
+            # print(self.robot_location, velocity_command, self.step_size)
+            self.robot_location += velocity_command * self.step_size
+            
+            # 更新栅格位置
+            self.robot_cell = np.round(
+                np.array([(self.robot_location[0] - self.belief_origin_x) / self.cell_size,
+                        (self.robot_location[1] - self.belief_origin_y) / self.cell_size])
+            ).astype(int)
+            
+            # 更新移动距离
+            moved_dist = np.linalg.norm(self.robot_location - old_location)
+            total_dist += moved_dist
+            self.distance_since_last_decision += moved_dist
+        
+        # 更新决策时间计数器
+        self.time_since_last_decision += self.step_size
+        
+        # 更新动态障碍物位置
+        self.update_dynamic_obstacles(self.step_size)
         
         # 检查碰撞
-        collision = self.check_collision()
+        if self.check_collision():
+            collision = True
+            self.collision_count += 1
+            
+        # 检查是否需要新决策 - 基于距离或时间
+        if (self.distance_since_last_decision >= self.decision_distance or
+            self.time_since_last_decision >= self.decision_interval):
+            need_decision = True
+            
+        # 更新机器人的信念地图（在一定间隔或碰撞时）
+        if need_decision or collision:
+            self.update_robot_belief()
         
-        self.travel_dist += dist
+        # 累计总移动距离
+        self.travel_dist += total_dist
+        
+        # 评估探索率
         self.evaluate_exploration_rate()
-
-        # 将碰撞信息传递给奖励计算函数
-        reward = self.calculate_reward(dist, collision)
-
-        return reward
+        
+        # 计算奖励
+        reward = self.calculate_reward(total_dist, collision)
+        
+        # 重置决策计数器
+        if need_decision or collision:
+            self.distance_since_last_decision = 0.0
+            self.time_since_last_decision = 0.0
+            
+        return reward, collision, need_decision
 
     # def plot_env(self, step):
 
