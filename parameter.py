@@ -7,7 +7,7 @@ gifs_path = f'gifs/{FOLDER_NAME}'
 # save training data
 SUMMARY_WINDOW = 32  # how many training steps before writing data to tensorboard
 LOAD_MODEL = False  # do you want to load the model trained before
-SAVE_IMG_GAP = 100  # how many episodes before saving a gif
+SAVE_IMG_GAP = 40  # how many episodes before saving a gif
 
 # map and planning resolution
 CELL_SIZE = 0.2  # meter, your map resolution
@@ -34,7 +34,7 @@ MINIMUM_BUFFER_SIZE = 100
 BATCH_SIZE = 64
 LR = 1e-5
 GAMMA = 1
-NUM_META_AGENT = 16  # how many threads does your CPU have
+NUM_META_AGENT = 8  # how many threads does your CPU have
 
 # network parameters
 # NODE_INPUT_DIM = 4
@@ -73,3 +73,8 @@ MAX_ROBOT_SPEED = 2.0           # 最大机器人速度(米/秒)
 
 MAX_VELOCITY = 2.0
 MIN_VELOCITY = -2.0
+
+# 目标网络更新参数
+TARGET_UPDATE_INTERVAL = 10  # 每隔多少步更新一次目标网络
+TAU = 0.005  # 软更新比例
+SAVE_INTERVAL = 100  # 每隔多少轮保存一次模型
