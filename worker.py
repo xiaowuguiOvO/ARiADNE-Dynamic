@@ -100,7 +100,8 @@ class Worker:
                 
                 # 计算/预测速度
                 velocity = self.robot.cal_next_velocity(observation)
-                
+                # 保存速度
+                self.save_velocity(velocity)
                 # 将速度应用到机器人
                 self.robot.velocity = velocity
             
@@ -123,9 +124,8 @@ class Worker:
             self.save_reward_done(reward, done or collision)
             
             # 如果需要决策或任务结束，保存下一个观察结果
-            if need_decision or done or collision:
-                next_observation = self.robot.get_observation()
-                self.save_next_observations(next_observation)
+            next_observation = self.robot.get_observation()
+            self.save_next_observations(next_observation)
             
             # 可视化 - 可根据需要调整保存频率
             if self.save_image and (need_decision or done or collision or step_count % VISUALIZATION_INTERVAL == 0):
@@ -156,9 +156,16 @@ class Worker:
         self.episode_buffer[4] += current_edge
         self.episode_buffer[5] += edge_padding_mask.bool()
 
-    def save_action(self, action_index):
+    def save_action(self, velocity):
+        action_tensor = torch.tensor(velocity).reshape(1, 1, 1)
         self.episode_buffer[6] += action_index.reshape(1, 1, 1)
-
+        
+    def save_velocity(self, velocity_vector):
+        """保存速度向量到经验缓冲区"""
+        if not isinstance(velocity_vector, torch.Tensor):
+            velocity_vector = torch.tensor(velocity_vector, device=self.device)
+        self.episode_buffer[6] += velocity_vector.reshape(1, 2, 1)
+        
     def save_reward_done(self, reward, done):
         self.episode_buffer[7] += torch.FloatTensor([reward]).reshape(1, 1, 1).to(self.device)
         self.episode_buffer[8] += torch.tensor([int(done)]).reshape(1, 1, 1).to(self.device)

@@ -30,11 +30,11 @@ UPDATING_MAP_SIZE = 4 * SENSOR_RANGE + 4 * NODE_RESOLUTION  # nodes outside this
 # training parameters
 MAX_EPISODE_STEP = 128
 REPLAY_SIZE = 10000
-MINIMUM_BUFFER_SIZE = 2000
+MINIMUM_BUFFER_SIZE = 100
 BATCH_SIZE = 64
 LR = 1e-5
 GAMMA = 1
-NUM_META_AGENT = 4  # how many threads does your CPU have
+NUM_META_AGENT = 16  # how many threads does your CPU have
 
 # network parameters
 # NODE_INPUT_DIM = 4
@@ -70,3 +70,6 @@ DECISION_INTERVAL = 0.5         # 决策间隔时间(秒)
 DECISION_DISTANCE = 2.0          # 决策距离阈值(米)
 VISUALIZATION_INTERVAL = 20      # 可视化帧间隔(步数)
 MAX_ROBOT_SPEED = 2.0           # 最大机器人速度(米/秒)
+
+MAX_VELOCITY = 2.0
+MIN_VELOCITY = -2.0

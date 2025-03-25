@@ -323,17 +323,26 @@ class Agent:
         return next_position, action_index
     
     def cal_next_velocity(self, observation):
-        _, _, _, _, current_edge, _ = observation
+        """计算下一个速度向量
+        
+        Args:
+            observation: 当前观察
+            
+        Returns:
+            velocity: 2D速度向量 [vx, vy]
+        """
         with torch.no_grad():
-            velocity_tensor = self.policy_net(*observation)
+            # 使用策略网络预测速度
+            velocity = self.policy_net(*observation, deterministic=True)
             
-        # 转换为numpy数组
-        if isinstance(velocity_tensor, torch.Tensor):
-            velocity = velocity_tensor.cpu().numpy().squeeze()
-        else:
-            velocity = velocity_tensor
+            # 如果是在GPU上，移到CPU并转为numpy
+            velocity = velocity.cpu().numpy()
             
+            # 可以添加额外的速度限制
+            velocity = np.clip(velocity, -MAX_VELOCITY, MAX_VELOCITY)
+        
         return velocity
+
     def plot_env(self):
         plt.switch_backend('agg')
 

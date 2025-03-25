@@ -283,6 +283,10 @@ class Env:
         # 从agent获取当前速度
         velocity_command = self.agent.velocity
         
+        # 确保velocity_command是正确的形状 (2,)
+        if isinstance(velocity_command, np.ndarray) and velocity_command.shape != (2,):
+            velocity_command = velocity_command.reshape(-1)  # 展平成一维数组
+        
         # 规范化速度命令到最大速度范围内
         velocity_norm = np.linalg.norm(velocity_command)
         if velocity_norm > MAX_ROBOT_SPEED and velocity_norm > 0:
@@ -300,13 +304,17 @@ class Env:
         if step_distance > 1e-6:
             # 更新位置
             old_location = self.robot_location.copy()
-            # print(self.robot_location, velocity_command, self.step_size)
-            self.robot_location += velocity_command * self.step_size
+            
+            # 确保step_size是标量
+            step_size_scalar = float(self.step_size)
+            
+            # 更新位置 - 使用标量乘法
+            self.robot_location = self.robot_location + velocity_command * step_size_scalar
             
             # 更新栅格位置
             self.robot_cell = np.round(
                 np.array([(self.robot_location[0] - self.belief_origin_x) / self.cell_size,
-                        (self.robot_location[1] - self.belief_origin_y) / self.cell_size])
+                          (self.robot_location[1] - self.belief_origin_y) / self.cell_size])
             ).astype(int)
             
             # 更新移动距离
