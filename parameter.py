@@ -28,13 +28,12 @@ MIN_UTILITY = 2  # ignore the utility if observable frontiers are less than this
 UPDATING_MAP_SIZE = 4 * SENSOR_RANGE + 4 * NODE_RESOLUTION  # nodes outside this range will not be affected by current measurements
 
 # training parameters
-MAX_EPISODE_STEP = 128
 REPLAY_SIZE = 10000
 MINIMUM_BUFFER_SIZE = 100
 BATCH_SIZE = 64
 LR = 1e-5
 GAMMA = 1
-NUM_META_AGENT = 8  # how many threads does your CPU have
+NUM_META_AGENT = 16  # how many threads does your CPU have
 
 # network parameters
 # NODE_INPUT_DIM = 4
@@ -59,20 +58,21 @@ ROBOT_RADIUS = 0.3             # 机器人半径 (m)
 COLLISION_PENALTY = 3       # 碰撞惩罚
 SAFE_DISTANCE = 1.5            # 安全距离 (m)
 PROXIMITY_PENALTY = 1        # 接近惩罚系数
+WALL_COLLISION_PENALTY = 20.0  # 墙壁碰撞惩罚
 
 OBSTACLE_CURVE_MIN_DIST = 5  # 最小障碍物轨迹距离
 OBSTACLE_CURVE_MAX_DIST = 20  # 最大障碍物轨迹距离
 
 # 时间和频率控制
+MAX_EPISODE_STEP = 2560
 MAX_EPISODE_TIME = 300.0         # 最大模拟时间(秒)
-STEP_SIZE = 0.05                 # 仿真时间步长(秒)
-DECISION_INTERVAL = 0.5         # 决策间隔时间(秒)
+STEP_SIZE = 0.01                 # 仿真时间步长(秒)
+DECISION_INTERVAL = 0.1         # 决策间隔时间(秒)
 DECISION_DISTANCE = 2.0          # 决策距离阈值(米)
-VISUALIZATION_INTERVAL = 20      # 可视化帧间隔(步数)
-MAX_ROBOT_SPEED = 2.0           # 最大机器人速度(米/秒)
+VISUALIZATION_INTERVAL = 20     # 可视化帧间隔(步数)
 
-MAX_VELOCITY = 2.0
-MIN_VELOCITY = -2.0
+MAX_VELOCITY = 12.0
+MIN_VELOCITY = -12.0
 
 # 目标网络更新参数
 TARGET_UPDATE_INTERVAL = 10  # 每隔多少步更新一次目标网络

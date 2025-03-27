@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import math
-
+from parameter import *
 
 # a pointer network layer for policy output
 class SingleHeadAttention(nn.Module):
@@ -279,7 +279,7 @@ class PolicyNet(nn.Module):
         
         # 在评估模式下直接返回均值
         if deterministic:
-            return torch.tanh(mean)
+            return torch.tanh(mean) * MAX_VELOCITY
         
         # 在训练模式下返回分布参数
         log_std = self.log_std_predictor(current_state_feature)

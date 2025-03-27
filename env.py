@@ -49,6 +49,8 @@ class Env:
         self.decision_distance = DECISION_DISTANCE
         self.distance_since_last_decision = 0.0
         self.time_since_last_decision = 0.0
+        
+        self.velocity_norm = 0.0
     def set_agent(self, agent):
         self.agent = agent
 
@@ -202,7 +204,7 @@ class Env:
         self.robot_belief = sensor_work(self.robot_cell, round(self.sensor_range / self.cell_size), self.robot_belief,
                                         self.ground_truth)
 
-    def calculate_reward(self, dist, collision=False):
+    def calculate_reward(self, dist, collision=False, wall_collision=False):
         reward = 0
         # 原有的距离惩罚
         reward -= dist / UPDATING_MAP_SIZE * 5
@@ -210,6 +212,8 @@ class Env:
         # 碰撞惩罚
         if collision:
             reward -= COLLISION_PENALTY
+        elif wall_collision:
+            reward -= WALL_COLLISION_PENALTY
         else:
             # 接近障碍物惩罚与避障奖励
             min_dist = float('inf')
@@ -251,24 +255,24 @@ class Env:
                 return True
         return False
     
-    # def step(self, next_waypoint):
-    #     dist = np.linalg.norm(self.robot_location - next_waypoint)
-    #     self.update_robot_location(next_waypoint)
-    #     self.update_robot_belief()
-
-    #     # 更新动态障碍物
-    #     self.update_dynamic_obstacles()
+    def check_wall_collision(self, position):
+        """检查给定位置是否与墙壁碰撞，使用机器人的信念地图"""
+        # 确保位置是整数坐标
+        x, y = np.round((position - np.array([self.belief_origin_x, self.belief_origin_y])) / self.cell_size).astype(int)
         
-    #     # 检查碰撞
-    #     collision = self.check_collision()
+        # 检查是否超出地图边界
+        if x < 0 or x >= self.robot_belief.shape[1] or y < 0 or y >= self.robot_belief.shape[0]:
+            return True
         
-    #     self.travel_dist += dist
-    #     self.evaluate_exploration_rate()
-
-    #     # 将碰撞信息传递给奖励计算函数
-    #     reward = self.calculate_reward(dist, collision)
-
-    #     return reward
+        # 检查位置的值
+        value = self.robot_belief[y, x]
+        # print(value)
+        # robot_belief中：
+        # - 0: 障碍物
+        # - 127: 未探索区域
+        # - 255: 已探索的自由空间
+        return value != 0  # 如果是障碍物，则发生碰撞
+    
     def step(self):
         """
         执行一个模拟步骤，使用agent的当前速度
@@ -282,16 +286,27 @@ class Env:
             
         # 从agent获取当前速度
         velocity_command = self.agent.velocity
+        # print("velocity_command: ", velocity_command)
         
         # 确保velocity_command是正确的形状 (2,)
         if isinstance(velocity_command, np.ndarray) and velocity_command.shape != (2,):
             velocity_command = velocity_command.reshape(-1)  # 展平成一维数组
         
-        # 规范化速度命令到最大速度范围内
-        velocity_norm = np.linalg.norm(velocity_command)
-        if velocity_norm > MAX_ROBOT_SPEED and velocity_norm > 0:
-            velocity_command = velocity_command / velocity_norm * MAX_ROBOT_SPEED
-            
+        current_pos = self.robot_location.copy()
+        next_pos = current_pos + velocity_command * self.step_size
+        
+        next_cell_x = np.round((next_pos[0] - self.belief_origin_x) / self.cell_size).astype(int)
+        next_cell_y = np.round((next_pos[1] - self.belief_origin_y) / self.cell_size).astype(int)
+        
+        wall_collision = False
+        if (next_cell_x < 0 or next_cell_x >= self.robot_belief.shape[1] or
+                next_cell_y < 0 or next_cell_y >= self.robot_belief.shape[0] or
+                self.robot_belief[next_cell_y, next_cell_x] != 255):  # 使用robot_belief检查障碍物
+                # 如果会碰到墙
+                wall_collision = True
+        # print(self.robot_belief[next_cell_y, next_cell_x], wall_collision)
+        # print(next_cell_x, next_cell_y)
+        self.velocity_norm = np.linalg.norm(velocity_command)
         # 记录总移动距离和是否碰撞
         total_dist = 0.0
         collision = False
@@ -299,28 +314,26 @@ class Env:
         
         # 计算当前步骤移动距离
         step_distance = np.linalg.norm(velocity_command) * self.step_size
+    
+        # 更新位置
+        old_location = self.robot_location.copy()
         
-        # 如果速度非零，移动机器人
-        if step_distance > 1e-6:
-            # 更新位置
-            old_location = self.robot_location.copy()
-            
-            # 确保step_size是标量
-            step_size_scalar = float(self.step_size)
-            
-            # 更新位置 - 使用标量乘法
-            self.robot_location = self.robot_location + velocity_command * step_size_scalar
-            
-            # 更新栅格位置
-            self.robot_cell = np.round(
-                np.array([(self.robot_location[0] - self.belief_origin_x) / self.cell_size,
-                          (self.robot_location[1] - self.belief_origin_y) / self.cell_size])
-            ).astype(int)
-            
-            # 更新移动距离
-            moved_dist = np.linalg.norm(self.robot_location - old_location)
-            total_dist += moved_dist
-            self.distance_since_last_decision += moved_dist
+        # 更新位置
+        if not wall_collision:
+            self.robot_location = next_pos
+        else:
+            self.robot_location = old_location
+            # print("collision, old belief: ", self.robot_belief[self.robot_cell[1], self.robot_cell[0]])
+        # 更新栅格位置
+        self.robot_cell = np.round(
+            np.array([(self.robot_location[0] - self.belief_origin_x) / self.cell_size,
+                        (self.robot_location[1] - self.belief_origin_y) / self.cell_size])
+        ).astype(int)
+        
+        # 更新移动距离
+        moved_dist = np.linalg.norm(self.robot_location - old_location)
+        total_dist += moved_dist
+        self.distance_since_last_decision += moved_dist
         
         # 更新决策时间计数器
         self.time_since_last_decision += self.step_size
@@ -349,7 +362,7 @@ class Env:
         self.evaluate_exploration_rate()
         
         # 计算奖励
-        reward = self.calculate_reward(total_dist, collision)
+        reward = self.calculate_reward(total_dist, collision, wall_collision)
         
         # 重置决策计数器
         if need_decision or collision:
@@ -358,22 +371,6 @@ class Env:
             
         return reward, collision, need_decision
 
-    # def plot_env(self, step):
-
-    #     plt.subplot(1, 3, 1)
-    #     plt.imshow(self.robot_belief, cmap='gray')
-    #     plt.axis('off')
-    #     plt.plot((self.robot_location[0] - self.belief_origin_x) / self.cell_size,
-    #              (self.robot_location[1] - self.belief_origin_y) / self.cell_size, 'mo', markersize=4, zorder=5)
-    #     plt.plot((np.array(self.trajectory_x) - self.belief_origin_x) / self.cell_size,
-    #              (np.array(self.trajectory_y) - self.belief_origin_y) / self.cell_size, 'b', linewidth=2, zorder=1)
-    #     plt.suptitle('Explored ratio: {:.4g}  Travel distance: {:.4g}'.format(self.explored_rate, self.travel_dist))
-    #     plt.tight_layout()
-    #     # plt.show()
-    #     plt.savefig('{}/{}_{}_samples.png'.format(gifs_path, self.episode_index, step), dpi=150)
-    #     frame = '{}/{}_{}_samples.png'.format(gifs_path, self.episode_index, step)
-    #     plt.close()
-    #     self.frame_files.append(frame)
     def plot_env(self, step):
         plt.subplot(1, 3, 1)
         plt.imshow(self.robot_belief, cmap='gray')
@@ -413,10 +410,13 @@ class Env:
             #           head_width=0.3, head_length=0.5, 
             #           fc='red', ec='red', alpha=0.7, zorder=4)
         
-        # 更新标题，添加碰撞计数
-        plt.suptitle('Explored: {:.4g}  Distance: {:.4g}  Collisions: {}'.format(
-            self.explored_rate, self.travel_dist, self.collision_count))
         
+        plt.suptitle('Explored: {:.4g}  Distance: {:.4g}  Collisions: {}  Speed: {:.2f} m/s'.format(
+            self.explored_rate, 
+            self.travel_dist, 
+            self.collision_count,
+            self.velocity_norm  
+        ))
         plt.tight_layout()
         plt.savefig('{}/{}_{}_samples.png'.format(gifs_path, self.episode_index, step), dpi=150)
         frame = '{}/{}_{}_samples.png'.format(gifs_path, self.episode_index, step)

@@ -76,43 +76,48 @@ class Worker:
         # 初始化环境和机器人状态
         done = False
         need_decision = True
-        simulation_time = 0.0  # 累计模拟时间
+        simulation_time = 0.0
         self.env.set_agent(self.robot)
         self.robot.update_planning_state(self.env.belief_info, self.env.robot_location)
-        
-        # 设置环境与机器人的关联关系
-        
         
         # 初始化可视化设置
         if self.save_image:
             self.robot.plot_env()
             self.env.plot_env(0)
         
-        # 主循环 - 基于最大时间或步数限制
-        max_simulation_time = MAX_EPISODE_TIME  # 替代MAX_EPISODE_STEP的时间限制
+        # 主循环
+        max_simulation_time = MAX_EPISODE_TIME
         step_count = 0
         
+        # # 初始化机器人速度
+        # if need_decision:
+        #     observation = self.robot.get_observation()
+        #     self.save_observation(observation)
+        #     velocity = self.robot.cal_next_velocity(observation)
+        #     self.save_velocity(velocity)
+        #     self.robot.velocity = velocity
+        
         while simulation_time < max_simulation_time and step_count < MAX_EPISODE_STEP and not done:
-            # 如果需要决策，获取新的速度命令
+            # 环境始终在执行
+            reward, collision, need_decision = self.env.step()
+            step_count += 1
+            simulation_time += self.env.step_size
+            
+            # 只在需要决策时更新速度
             if need_decision:
                 observation = self.robot.get_observation()
                 self.save_observation(observation)
                 
-                # 计算/预测速度
+                # 计算新的速度命令
                 velocity = self.robot.cal_next_velocity(observation)
-                # 保存速度
                 self.save_velocity(velocity)
-                # 将速度应用到机器人
                 self.robot.velocity = velocity
+                
+                # 保存观察和下一个状态（用于训练）
+                next_observation = self.robot.get_observation()
+                self.save_next_observations(next_observation)
             
-            # 执行环境步进 - 这里的步进是一个小的时间间隔
-            reward, collision, need_decision = self.env.step()
-            step_count += 1
-            
-            # 更新模拟时间
-            simulation_time += self.env.step_size
-            
-            # 更新机器人状态
+            # 更新机器人规划状态
             self.robot.update_planning_state_use_nearest_node(self.env.belief_info, self.env.robot_location)
             
             # 检查是否完成探索
@@ -123,18 +128,10 @@ class Worker:
             # 保存奖励和完成状态
             self.save_reward_done(reward, done or collision)
             
-            # 如果需要决策或任务结束，保存下一个观察结果
-            next_observation = self.robot.get_observation()
-            self.save_next_observations(next_observation)
-            
-            # 可视化 - 可根据需要调整保存频率
+            # 可视化
             if self.save_image and (need_decision or done or collision or step_count % VISUALIZATION_INTERVAL == 0):
                 self.robot.plot_env()
                 self.env.plot_env(step_count)
-            
-            # 如果发生碰撞，也视为完成
-            # if collision:
-            #     done = True
         
         # 保存性能指标
         self.perf_metrics['travel_dist'] = self.env.travel_dist
@@ -186,5 +183,5 @@ if __name__ == "__main__":
     model = PolicyNet(NODE_INPUT_DIM, EMBEDDING_DIM)
     # checkpoint = torch.load(model_path + '/checkpoint.pth', map_location='cpu')
     # model.load_state_dict(checkpoint['policy_model'])
-    worker = Worker(0, model, 77, save_image=True)
+    worker = Worker(0, model, 78, save_image=True)
     worker.run_episode()

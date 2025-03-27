@@ -331,6 +331,7 @@ class Agent:
         Returns:
             velocity: 2D速度向量 [vx, vy]
         """
+        start_time = time.time()
         with torch.no_grad():
             # 使用策略网络预测速度
             velocity = self.policy_net(*observation, deterministic=True)
@@ -340,7 +341,8 @@ class Agent:
             
             # 可以添加额外的速度限制
             velocity = np.clip(velocity, -MAX_VELOCITY, MAX_VELOCITY)
-        
+        end_time = time.time()
+        print(f"cal_next_velocity time: {end_time - start_time} seconds")
         return velocity
 
     def plot_env(self):
