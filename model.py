@@ -276,16 +276,14 @@ class PolicyNet(nn.Module):
         
         # 预测均值和log标准差
         mean = self.mean_predictor(current_state_feature)
-        
-        # 在评估模式下直接返回均值
-        if deterministic:
-            return torch.tanh(mean) * MAX_VELOCITY
-        
-        # 在训练模式下返回分布参数
+        linear_vel = torch.sigmoid(mean[:, 0])
+        angular_vel = torch.tanh(mean[:, 1])
         log_std = self.log_std_predictor(current_state_feature)
-        log_std = torch.clamp(log_std, self.log_std_min, self.log_std_max)
+        std = torch.exp(log_std)
+        action = torch.normal(mean, std)
+        # velocity = action.cpu().numpy()
         
-        return mean, log_std
+        return action, mean, log_std
 
 
 

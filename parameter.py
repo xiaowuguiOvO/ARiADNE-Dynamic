@@ -49,32 +49,38 @@ USE_GPU = False  # do you want to collect training data using GPUs (better not)
 USE_GPU_GLOBAL = True  # do you want to train the network using GPUs
 NUM_GPU = 0  # 0 unless you want to collect data using GPUs
 
+SPEED_SCALE = 10
 # 动态障碍物参数
 NUM_DYNAMIC_OBSTACLES = 10      # 动态障碍物数量
-MIN_OBSTACLE_SPEED = 0.5      # 最小障碍物速度
-MAX_OBSTACLE_SPEED = 2       # 最大障碍物速度
+MIN_OBSTACLE_SPEED = 0.5 * SPEED_SCALE      # 最小障碍物速度
+MAX_OBSTACLE_SPEED = 2 * SPEED_SCALE       # 最大障碍物速度
 OBSTACLE_RADIUS = 0.4          # 障碍物半径 (m)
 ROBOT_RADIUS = 0.3             # 机器人半径 (m)
-COLLISION_PENALTY = 3       # 碰撞惩罚
+COLLISION_PENALTY = 0       # 碰撞惩罚
 SAFE_DISTANCE = 1.5            # 安全距离 (m)
 PROXIMITY_PENALTY = 1        # 接近惩罚系数
-WALL_COLLISION_PENALTY = 20.0  # 墙壁碰撞惩罚
+WALL_COLLISION_PENALTY = 0.05  # 墙壁碰撞惩罚
 
 OBSTACLE_CURVE_MIN_DIST = 5  # 最小障碍物轨迹距离
 OBSTACLE_CURVE_MAX_DIST = 20  # 最大障碍物轨迹距离
 
 # 时间和频率控制
-MAX_EPISODE_STEP = 2560
+MAX_EPISODE_STEP = 1280
 MAX_EPISODE_TIME = 300.0         # 最大模拟时间(秒)
 STEP_SIZE = 0.01                 # 仿真时间步长(秒)
 DECISION_INTERVAL = 0.1         # 决策间隔时间(秒)
 DECISION_DISTANCE = 2.0          # 决策距离阈值(米)
 VISUALIZATION_INTERVAL = 20     # 可视化帧间隔(步数)
 
-MAX_VELOCITY = 12.0
-MIN_VELOCITY = -12.0
+# MAX_VELOCITY = 12.0
+# MIN_VELOCITY = -12.0
+MAX_LINEAR_VELOCITY = 6 * SPEED_SCALE
+MIN_LINEAR_VELOCITY = 0.5
+MAX_ANGULAR_VELOCITY = 1.0 * SPEED_SCALE
 
 # 目标网络更新参数
 TARGET_UPDATE_INTERVAL = 10  # 每隔多少步更新一次目标网络
 TAU = 0.005  # 软更新比例
 SAVE_INTERVAL = 100  # 每隔多少轮保存一次模型
+
+ENTROPY_TARGET = -2.0  

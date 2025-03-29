@@ -179,7 +179,7 @@ def main():
                     with torch.no_grad():
                         q_values1 = dp_q_net1(*observation)
                         q_values2 = dp_q_net2(*observation)
-                        q_values = torch.min(q_values1, q_values2)
+                        q_values = torch.min(q_values1, q_val   ues2)
 
                     logp = dp_policy(*observation)
                     policy_loss = torch.sum(
