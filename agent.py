@@ -42,7 +42,7 @@ class Agent:
         # 动态障碍物
         self.obstacle_velocities = None
         # 自身速度
-        self.velocity = np.array([0.0, 0.0])  # 当前速度
+        self.velocity = np.array([0.0, 0.0])  # 当前速度        
         self.nearest_node = None
         self.nearest_node_index = float('inf')
 
@@ -323,27 +323,15 @@ class Agent:
         return next_position, action_index
     
     def cal_next_velocity(self, observation):
-        """计算下一个速度向量
-        
-        Args:
-            observation: 当前观察
-            
-        Returns:
-            velocity: 2D速度向量 [vx, vy]
-        """
-        start_time = time.time()
         with torch.no_grad():
-            # 使用策略网络预测速度
-            velocity = self.policy_net(*observation, deterministic=True)
+            # 获取策略网络输出
+            velocity, mean, log_std = self.policy_net(*observation)
+            # 截断速度
+            linear_vel = torch.sigmoid(velocity[:, 0]).unsqueeze(1) * MAX_LINEAR_VELOCITY
+            angular_vel = torch.tanh(velocity[:, 1]).unsqueeze(1) * MAX_ANGULAR_VELOCITY
             
-            # 如果是在GPU上，移到CPU并转为numpy
-            velocity = velocity.cpu().numpy()
-            
-            # 可以添加额外的速度限制
-            velocity = np.clip(velocity, -MAX_VELOCITY, MAX_VELOCITY)
-        end_time = time.time()
-        print(f"cal_next_velocity time: {end_time - start_time} seconds")
-        return velocity
+            velocity = torch.stack((linear_vel, angular_vel), dim=1)
+        return velocity.cpu().numpy()
 
     def plot_env(self):
         plt.switch_backend('agg')

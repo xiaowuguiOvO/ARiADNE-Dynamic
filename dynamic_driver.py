@@ -11,6 +11,8 @@ from model import PolicyNet, QNet
 from runner import RLRunner
 from parameter import *
 
+writer = SummaryWriter(train_path)
+
 # 设置随机种子
 def set_seed(seed):
     random.seed(seed)
@@ -51,10 +53,7 @@ def main():
     # 初始化log_alpha
     log_alpha = torch.zeros(1, requires_grad=True, device=device)
     log_alpha_optimizer = optim.Adam([log_alpha], lr=1e-4)
-    
-    # 目标熵值
-    entropy_target = -2.0  # 可以根据动作空间调整
-    
+        
     # 加载模型（如果需要）
     curr_episode = 0
     if LOAD_MODEL:
@@ -191,34 +190,39 @@ def main():
                     next_observation_policy = [next_node_inputs, next_node_padding_mask, next_edge_mask,
                                               next_current_index, next_current_edge, next_edge_padding_mask]
                     
-                    # 为Q网络准备观察（只需要5个参数）
-                    observation_q = [node_inputs, node_padding_mask, edge_mask, current_index, action]
-                    
                     # SAC算法实现
                     with torch.no_grad():
-                        # 使用正确的参数调用Q网络
                         q_values1 = dp_q_net1(node_inputs, node_padding_mask, edge_mask, current_index, action)
                         q_values2 = dp_q_net2(node_inputs, node_padding_mask, edge_mask, current_index, action)
                         q_values = torch.min(q_values1, q_values2)
                     
                     # 策略网络前向传播
-                    mean, log_std = dp_policy(*observation_policy)
+                    velocity, mean, log_std = dp_policy(*observation_policy)
                     
                     # 从正态分布中采样动作
                     std = torch.exp(log_std)
                     normal = torch.distributions.Normal(mean, std)
                     x_t = normal.rsample()  # 重参数化采样
-                    y_t = torch.tanh(x_t)   # 使用tanh限制动作范围
-                    action_sampled = y_t
                     
+                    linear_vel = torch.sigmoid(x_t[:, 0]).unsqueeze(1) * MAX_LINEAR_VELOCITY
+                    angular_vel = torch.tanh(x_t[:, 1]).unsqueeze(1) * MAX_ANGULAR_VELOCITY
+                    action_sampled = torch.cat((linear_vel, angular_vel), dim=-1)
                     # 计算对数概率
                     log_prob = normal.log_prob(x_t)
                     # 应用tanh变换的校正
-                    log_prob -= torch.log(1 - y_t.pow(2) + 1e-6)
+                    sigmoid_part = x_t[:, 0].unsqueeze(1)
+                    sigmoid_correction = torch.log(torch.sigmoid(sigmoid_part) * (1 - torch.sigmoid(sigmoid_part)) + 1e-6)
+
+                    tanh_part = x_t[:, 1].unsqueeze(1)
+                    tanh_correction = torch.log(1 - torch.tanh(tanh_part).pow(2) + 1e-6)
+
+                    # 应用校正
+                    log_prob = log_prob - torch.cat([sigmoid_correction, tanh_correction], dim=1)
                     log_prob = log_prob.sum(1, keepdim=True)
-                    
                     # 计算策略损失
-                    q_new_actions = dp_q_net1(node_inputs, node_padding_mask, edge_mask, current_index, action_sampled)
+                    q1_new_actions = dp_q_net1(node_inputs, node_padding_mask, edge_mask, current_index, action_sampled)
+                    q2_new_actions = dp_q_net2(node_inputs, node_padding_mask, edge_mask, current_index, action_sampled)
+                    q_new_actions = torch.min(q1_new_actions, q2_new_actions)
                     policy_loss = (log_alpha.exp() * log_prob - q_new_actions).mean()
                     
                     # 更新策略网络
@@ -230,16 +234,25 @@ def main():
                     # 计算目标Q值
                     with torch.no_grad():
                         # 对下一个状态采样动作
-                        next_mean, next_log_std = dp_policy(*next_observation_policy)
+                        velocity, next_mean, next_log_std = dp_policy(*next_observation_policy)
                         next_std = torch.exp(next_log_std)
                         next_normal = torch.distributions.Normal(next_mean, next_std)
                         next_x_t = next_normal.rsample()
-                        next_y_t = torch.tanh(next_x_t)
-                        next_action = next_y_t
                         
-                        # 计算下一个状态的对数概率
+                        next_linear_vel = torch.sigmoid(next_x_t[:, 0]).unsqueeze(1) * MAX_LINEAR_VELOCITY
+                        next_angular_vel = torch.tanh(next_x_t[:, 1]).unsqueeze(1) * MAX_ANGULAR_VELOCITY
+                        next_action = torch.cat((next_linear_vel, next_angular_vel), dim=1)
+                        
                         next_log_prob = next_normal.log_prob(next_x_t)
-                        next_log_prob -= torch.log(1 - next_y_t.pow(2) + 1e-6)
+                        
+                        # 应用一致的校正
+                        next_sigmoid_part = next_x_t[:, 0].unsqueeze(1)
+                        next_sigmoid_correction = torch.log(torch.sigmoid(next_sigmoid_part) * (1 - torch.sigmoid(next_sigmoid_part)) + 1e-6)
+                        
+                        next_tanh_part = next_x_t[:, 1].unsqueeze(1)
+                        next_tanh_correction = torch.log(1 - torch.tanh(next_tanh_part).pow(2) + 1e-6)
+                        
+                        next_log_prob = next_log_prob - torch.cat([next_sigmoid_correction, next_tanh_correction], dim=1)
                         next_log_prob = next_log_prob.sum(1, keepdim=True)
                         
                         # 计算下一个状态的Q值
@@ -272,7 +285,7 @@ def main():
                     global_q_net2_optimizer.step()
                     
                     # 更新alpha
-                    alpha_loss = -(log_alpha * (log_prob.detach() + entropy_target)).mean()
+                    alpha_loss = -(log_alpha * (log_prob.detach() + ENTROPY_TARGET)).mean()
                     
                     log_alpha_optimizer.zero_grad()
                     alpha_loss.backward()
@@ -294,7 +307,14 @@ def main():
                         log_prob.mean().item(), policy_grad_norm.item(), q1_grad_norm.item(), log_alpha.item(),
                         alpha_loss.item(), *perf_data]
                 training_data.append(data)
-                
+                # write record to tensorboard
+                if len(training_data) >= SUMMARY_WINDOW:
+                    write_to_tensor_board(writer, training_data, curr_episode)
+                    training_data = []
+                    perf_metrics = {}
+                    for n in metric_name:
+                        perf_metrics[n] = []
+
                 # 保存模型
                 if curr_episode % SAVE_INTERVAL == 0:
                     print(f"Saving model at episode {curr_episode}")
@@ -310,7 +330,6 @@ def main():
                         'episode': curr_episode
                     }
                     torch.save(checkpoint, f"{model_path}/checkpoint.pth")
-                    torch.save(checkpoint, f"{model_path}/checkpoint_{curr_episode}.pth")
     
     except KeyboardInterrupt:
         print("Training interrupted by user")
@@ -333,6 +352,30 @@ def main():
         
         # 关闭Ray
         ray.shutdown()
+
+
+def write_to_tensor_board(writer, tensorboard_data, curr_episode):
+    # each row in tensorboardData represents an episode
+    # each column is a specific metric
+
+    tensorboard_data = np.array(tensorboard_data)
+    tensorboard_data = list(np.nanmean(tensorboard_data, axis=0))
+    reward, value, policy_loss, q_value_loss, entropy, policy_grad_norm, q_value_grad_norm, log_alpha, alpha_loss, travel_dist, success_rate, explored_rate, collision_count = tensorboard_data
+
+    writer.add_scalar(tag='Losses/Value', scalar_value=value, global_step=curr_episode)
+    writer.add_scalar(tag='Losses/Policy Loss', scalar_value=policy_loss, global_step=curr_episode)
+    writer.add_scalar(tag='Losses/Alpha Loss', scalar_value=alpha_loss, global_step=curr_episode)
+    writer.add_scalar(tag='Losses/Q Value Loss', scalar_value=q_value_loss, global_step=curr_episode)
+    writer.add_scalar(tag='Losses/Entropy', scalar_value=entropy, global_step=curr_episode)
+    writer.add_scalar(tag='Losses/Policy Grad Norm', scalar_value=policy_grad_norm, global_step=curr_episode)
+    writer.add_scalar(tag='Losses/Q Value Grad Norm', scalar_value=q_value_grad_norm, global_step=curr_episode)
+    writer.add_scalar(tag='Losses/Log Alpha', scalar_value=log_alpha, global_step=curr_episode)
+    writer.add_scalar(tag='Perf/Reward', scalar_value=reward, global_step=curr_episode)
+    writer.add_scalar(tag='Perf/Travel Distance', scalar_value=travel_dist, global_step=curr_episode)
+    writer.add_scalar(tag='Perf/Explored Rate', scalar_value=explored_rate, global_step=curr_episode)
+    writer.add_scalar(tag='Perf/Success Rate', scalar_value=success_rate, global_step=curr_episode)
+    writer.add_scalar(tag='Perf/Collision Count', scalar_value=collision_count, global_step=curr_episode) 
+
 
 if __name__ == "__main__":
     main()

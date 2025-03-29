@@ -50,7 +50,8 @@ class Env:
         self.distance_since_last_decision = 0.0
         self.time_since_last_decision = 0.0
         
-        self.velocity_norm = 0.0
+        self.velocity_command = np.array([0.0, 0.0])
+        self.total_reward = 0.0
     def set_agent(self, agent):
         self.agent = agent
 
@@ -207,27 +208,14 @@ class Env:
     def calculate_reward(self, dist, collision=False, wall_collision=False):
         reward = 0
         # 原有的距离惩罚
-        reward -= dist / UPDATING_MAP_SIZE * 5
+        # reward -= dist / UPDATING_MAP_SIZE * 5
         
         # 碰撞惩罚
         if collision:
             reward -= COLLISION_PENALTY
         elif wall_collision:
             reward -= WALL_COLLISION_PENALTY
-        else:
-            # 接近障碍物惩罚与避障奖励
-            min_dist = float('inf')
-            for obs in self.dynamic_obstacles:
-                dist_to_obs = np.linalg.norm(self.robot_location - obs['position'])
-                min_dist = min(min_dist, dist_to_obs)
-            
-            # 如果太接近障碍物，给予惩罚
-            if min_dist < SAFE_DISTANCE:
-                reward -= PROXIMITY_PENALTY * (1.0 - min_dist/SAFE_DISTANCE)
-            elif min_dist < SAFE_DISTANCE * 1.5:
-                # 成功保持安全距离但有风险，小奖励
-                reward += 1.0
-        
+
         # 原有的探索奖励
         global_frontiers = get_frontier_in_map(self.belief_info)
         if len(global_frontiers) == 0:
@@ -275,7 +263,7 @@ class Env:
     
     def step(self):
         """
-        执行一个模拟步骤，使用agent的当前速度
+        执行一个模拟步骤，使用agent的当前速度（线速度和角速度）
         返回:
             reward: 奖励值
             collision: 是否发生碰撞
@@ -284,16 +272,34 @@ class Env:
         if self.agent is None:
             raise ValueError("必须先使用set_agent设置代理")
             
-        # 从agent获取当前速度
+        # 从agent获取当前速度 [linear, angular]
         velocity_command = self.agent.velocity
         # print("velocity_command: ", velocity_command)
-        
         # 确保velocity_command是正确的形状 (2,)
         if isinstance(velocity_command, np.ndarray) and velocity_command.shape != (2,):
             velocity_command = velocity_command.reshape(-1)  # 展平成一维数组
         
+        # 获取线速度和角速度
+        linear_vel = velocity_command[0]
+        angular_vel = velocity_command[1]
+        
+        # 初始化机器人朝向(如果不存在)
+        if not hasattr(self, 'robot_orientation'):
+            self.robot_orientation = 0.0  # 初始朝向
+        
+        # 更新朝向
+        self.robot_orientation += angular_vel * self.step_size
+        # 标准化到 [-π, π]
+        self.robot_orientation = np.arctan2(np.sin(self.robot_orientation), np.cos(self.robot_orientation))
+        
+        # 使用线速度和朝向计算x,y方向的速度分量
+        vx = linear_vel * np.cos(self.robot_orientation)
+        vy = linear_vel * np.sin(self.robot_orientation)
+        cartesian_velocity = np.array([vx, vy])
+        
+        # 使用笛卡尔速度计算下一个位置
         current_pos = self.robot_location.copy()
-        next_pos = current_pos + velocity_command * self.step_size
+        next_pos = current_pos + cartesian_velocity * self.step_size
         
         next_cell_x = np.round((next_pos[0] - self.belief_origin_x) / self.cell_size).astype(int)
         next_cell_y = np.round((next_pos[1] - self.belief_origin_y) / self.cell_size).astype(int)
@@ -304,17 +310,20 @@ class Env:
                 self.robot_belief[next_cell_y, next_cell_x] != 255):  # 使用robot_belief检查障碍物
                 # 如果会碰到墙
                 wall_collision = True
-        # print(self.robot_belief[next_cell_y, next_cell_x], wall_collision)
-        # print(next_cell_x, next_cell_y)
-        self.velocity_norm = np.linalg.norm(velocity_command)
+        
+        # 保存原始控制命令用于记录
+        self.velocity_command = velocity_command  # [linear, angular]
+        # 保存转换后的笛卡尔速度用于其他计算
+        self.cartesian_velocity = cartesian_velocity
+        
         # 记录总移动距离和是否碰撞
         total_dist = 0.0
         collision = False
         need_decision = False
         
-        # 计算当前步骤移动距离
-        step_distance = np.linalg.norm(velocity_command) * self.step_size
-    
+        # 计算当前步骤移动距离 - 使用笛卡尔速度的模长
+        step_distance = np.linalg.norm(cartesian_velocity) * self.step_size
+        
         # 更新位置
         old_location = self.robot_location.copy()
         
@@ -322,8 +331,9 @@ class Env:
         if not wall_collision:
             self.robot_location = next_pos
         else:
-            self.robot_location = old_location
+            self.robot_location = old_location - cartesian_velocity * self.step_size * 0.5
             # print("collision, old belief: ", self.robot_belief[self.robot_cell[1], self.robot_cell[0]])
+        
         # 更新栅格位置
         self.robot_cell = np.round(
             np.array([(self.robot_location[0] - self.belief_origin_x) / self.cell_size,
@@ -363,7 +373,7 @@ class Env:
         
         # 计算奖励
         reward = self.calculate_reward(total_dist, collision, wall_collision)
-        
+        self.total_reward += reward
         # 重置决策计数器
         if need_decision or collision:
             self.distance_since_last_decision = 0.0
@@ -411,11 +421,13 @@ class Env:
             #           fc='red', ec='red', alpha=0.7, zorder=4)
         
         
-        plt.suptitle('Explored: {:.4g}  Distance: {:.4g}  Collisions: {}  Speed: {:.2f} m/s'.format(
+        plt.suptitle('Explored: {:.4g}  Distance: {:.4g}  Collisions: {}  Linear: {:.2f} Angular: {:.2f} Total Reward: {:.2f}'.format(
             self.explored_rate, 
             self.travel_dist, 
             self.collision_count,
-            self.velocity_norm  
+            self.velocity_command[0],
+            self.velocity_command[1],
+            self.total_reward
         ))
         plt.tight_layout()
         plt.savefig('{}/{}_{}_samples.png'.format(gifs_path, self.episode_index, step), dpi=150)
