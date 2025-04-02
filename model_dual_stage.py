@@ -1,324 +1,9 @@
 import torch
 import torch.nn as nn
-<<<<<<< HEAD
 import torch.nn.functional as F
 from parameter import *
-
-
-
-
-class WaypointSelector(nn.Module):
-    """高级规划：选择下一个导航点"""
-    def __init__(self, node_input_dim, embedding_dim, hidden_dim=128):
-        super(WaypointSelector, self).__init__()
-        
-        # 节点特征编码
-        self.node_encoder = nn.Sequential(
-            nn.Linear(node_input_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, embedding_dim)
-        )
-        
-        # 图注意力层
-        self.gat1 = GraphAttention(embedding_dim, embedding_dim)
-        self.gat2 = GraphAttention(embedding_dim, embedding_dim)
-        
-        # 输出层 - 为每个可能的节点生成分数
-        self.edge_encoder = nn.Linear(1, embedding_dim)
-        self.output_layer = nn.Sequential(
-            nn.Linear(embedding_dim * 2, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, 1)
-        )
-        
-    def forward(self, node_inputs, node_padding_mask, edge_mask, current_index, current_edge, edge_padding_mask):
-        batch_size = node_inputs.size(0)
-        
-        # 编码节点特征
-        node_embeddings = self.node_encoder(node_inputs)
-        
-        # 图注意力处理
-        adj_matrix = edge_mask
-        node_embeddings = self.gat1(node_embeddings, adj_matrix, node_padding_mask)
-        node_embeddings = F.relu(node_embeddings)
-        node_embeddings = self.gat2(node_embeddings, adj_matrix, node_padding_mask)
-        
-        # 获取当前节点特征
-        current_node_indices = current_index.view(batch_size, 1, 1).expand(-1, -1, node_embeddings.size(2))
-        current_node_features = torch.gather(node_embeddings, 1, current_node_indices).squeeze(1)
-        
-        # 处理边特征
-        edge_features = self.edge_encoder(current_edge)
-        
-        # 计算候选节点分数
-        k_size = current_edge.size(1)
-        expanded_current_features = current_node_features.unsqueeze(1).expand(-1, k_size, -1)
-        combined_features = torch.cat([expanded_current_features, edge_features], dim=2)
-        
-        # 生成分数并应用掩码
-        logits = self.output_layer(combined_features).squeeze(-1)
-        logits = logits.masked_fill(edge_padding_mask.squeeze(1) == 0, -9e15)
-        
-        # 转换为概率
-        probs = F.softmax(logits, dim=1)
-        log_probs = F.log_softmax(logits, dim=1)
-        
-        return log_probs
-
-class LocalController(nn.Module):
-    """低级控制：根据局部地图和目标waypoint生成速度命令"""
-    def __init__(self, node_input_dim, embedding_dim, hidden_dim=128):
-        super(LocalController, self).__init__()
-        
-        # 节点特征编码
-        self.node_encoder = nn.Sequential(
-            nn.Linear(node_input_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, embedding_dim)
-        )
-        
-        # 目标点编码
-        self.target_encoder = nn.Sequential(
-            nn.Linear(2, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, embedding_dim)
-        )
-        
-        # 图注意力层
-        self.gat = GraphAttention(embedding_dim, embedding_dim)
-        
-        # 当前位置编码
-        self.position_encoder = nn.Sequential(
-            nn.Linear(2, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, embedding_dim)
-        )
-        
-        # ----- 新增：局部地图处理 -----
-        # 假设局部地图大小为 LOCAL_MAP_SIZE x LOCAL_MAP_SIZE
-        LOCAL_MAP_SIZE = 32  # 局部地图大小 (如16x16或32x32像素)
-        self.local_map_conv = nn.Sequential(
-            nn.Conv2d(1, 16, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(),
-            nn.MaxPool2d(2),
-            nn.Conv2d(16, 32, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(),
-            nn.MaxPool2d(2),
-            nn.Conv2d(32, 32, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(),
-            nn.AdaptiveAvgPool2d((4, 4))  # 自适应池化到固定大小
-        )
-        
-        # 扁平化后的map特征维度
-        map_feature_size = 32 * 4 * 4
-        
-        self.map_fc = nn.Sequential(
-            nn.Linear(map_feature_size, embedding_dim),
-            nn.ReLU()
-        )
-        # ----------------------------
-        
-        # SAC策略网络输出层 - 注意增加了map特征的输入
-        self.mean_layer = nn.Sequential(
-            nn.Linear(embedding_dim * 4, hidden_dim),  # 现在是4个特征拼接
-            nn.ReLU(),
-            nn.Linear(hidden_dim, 2)  # [vx, vy]
-        )
-        
-        self.log_std_layer = nn.Sequential(
-            nn.Linear(embedding_dim * 4, hidden_dim),  # 现在是4个特征拼接
-            nn.ReLU(),
-            nn.Linear(hidden_dim, 2)  # [log_std_vx, log_std_vy]
-        )
-        
-        # 动作范围限制
-        self.action_scale = torch.tensor([MAX_VELOCITY, MAX_VELOCITY])
-        self.action_bias = torch.tensor([0.0, 0.0])
-        
-    def forward(self, observation, target_waypoint, current_position, local_map, deterministic=False):
-        node_inputs, node_padding_mask, edge_mask, current_index, _, _ = observation
-        batch_size = node_inputs.size(0)
-        
-        # 编码节点特征
-        node_embeddings = self.node_encoder(node_inputs)
-        
-        # 图注意力处理
-        node_embeddings = self.gat(node_embeddings, edge_mask, node_padding_mask)
-        
-        # 编码目标点
-        target_embedding = self.target_encoder(target_waypoint)
-        
-        # 编码当前位置
-        position_embedding = self.position_encoder(current_position)
-        
-        # 获取当前节点特征
-        current_node_indices = current_index.view(batch_size, 1, 1).expand(-1, -1, node_embeddings.size(2))
-        current_node_features = torch.gather(node_embeddings, 1, current_node_indices).squeeze(1)
-        
-        # ----- 处理局部地图 -----
-        # 确保local_map的形状正确 [batch_size, 1, height, width]
-        if len(local_map.shape) == 3:
-            local_map = local_map.unsqueeze(1)
-        
-        # 使用CNN处理局部地图
-        map_features = self.local_map_conv(local_map)
-        map_features = map_features.view(batch_size, -1)  # 扁平化
-        map_embedding = self.map_fc(map_features)
-        # -------------------------
-        
-        # 组合特征 - 现在包括地图特征
-        combined_features = torch.cat([
-            current_node_features, 
-            target_embedding, 
-            position_embedding,
-            map_embedding  # 添加地图特征
-        ], dim=1)
-        
-        # 计算动作分布参数
-        mean = self.mean_layer(combined_features)
-        log_std = self.log_std_layer(combined_features)
-        
-        # 限制log_std范围，防止方差过大或过小
-        log_std = torch.clamp(log_std, -20, 2)
-        std = log_std.exp()
-        
-        if deterministic:
-            # 确定性策略直接返回均值
-            actions = mean
-        else:
-            # 随机策略从分布中采样
-            normal = torch.distributions.Normal(mean, std)
-            x_t = normal.rsample()  # 重参数化技巧
-            actions = torch.tanh(x_t)  # 使用tanh压缩到[-1,1]范围
-            
-            # 计算log_prob，用于训练
-            log_prob = normal.log_prob(x_t)
-            # 因为使用了tanh压缩，需要调整log_prob
-            log_prob -= torch.log(1 - actions.pow(2) + 1e-6)
-            log_prob = log_prob.sum(1, keepdim=True)
-        
-        # 缩放到实际动作范围
-        scaled_actions = actions * self.action_scale + self.action_bias
-        
-        if deterministic:
-            return scaled_actions
-        else:
-            return scaled_actions, log_prob, mean, log_std
-
-class QNetwork(nn.Module):
-    """Q网络：评估状态-动作价值"""
-    def __init__(self, node_input_dim, embedding_dim, action_dim=2, hidden_dim=128):
-        super(QNetwork, self).__init__()
-        
-        # 节点特征编码
-        self.node_encoder = nn.Sequential(
-            nn.Linear(node_input_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, embedding_dim)
-        )
-        
-        # 图注意力层
-        self.gat = GraphAttention(embedding_dim, embedding_dim)
-        
-        # ----- 新增：局部地图处理 -----
-        LOCAL_MAP_SIZE = 32  # 与控制器保持一致
-        self.local_map_conv = nn.Sequential(
-            nn.Conv2d(1, 16, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(),
-            nn.MaxPool2d(2),
-            nn.Conv2d(16, 32, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(),
-            nn.MaxPool2d(2),
-            nn.Conv2d(32, 32, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(),
-            nn.AdaptiveAvgPool2d((4, 4))  # 自适应池化到固定大小
-        )
-        
-        map_feature_size = 32 * 4 * 4
-        
-        self.map_fc = nn.Sequential(
-            nn.Linear(map_feature_size, embedding_dim),
-            nn.ReLU()
-        )
-        # ----------------------------
-        
-        # 当前位置编码
-        self.position_encoder = nn.Sequential(
-            nn.Linear(2, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, embedding_dim)
-        )
-        
-        # 目标点编码
-        self.target_encoder = nn.Sequential(
-            nn.Linear(2, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, embedding_dim)
-        )
-        
-        # 动作编码
-        self.action_encoder = nn.Sequential(
-            nn.Linear(action_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, embedding_dim)
-        )
-        
-        # Q值输出层 - 更新以包含所有特征
-        self.q_layer = nn.Sequential(
-            nn.Linear(embedding_dim * 5, hidden_dim),  # 5个特征拼接
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, 1)
-        )
-        
-    def forward(self, node_inputs, node_padding_mask, edge_mask, current_index, 
-               current_position, target_waypoint, local_map, action):
-        batch_size = node_inputs.size(0)
-        
-        # 编码节点特征
-        node_embeddings = self.node_encoder(node_inputs)
-        
-        # 图注意力处理
-        node_embeddings = self.gat(node_embeddings, edge_mask, node_padding_mask)
-        
-        # 获取当前节点特征
-        current_node_indices = current_index.view(batch_size, 1, 1).expand(-1, -1, node_embeddings.size(2))
-        current_node_features = torch.gather(node_embeddings, 1, current_node_indices).squeeze(1)
-        
-        # 编码位置
-        position_embedding = self.position_encoder(current_position)
-        
-        # 编码目标点
-        target_embedding = self.target_encoder(target_waypoint)
-        
-        # 处理局部地图
-        if len(local_map.shape) == 3:
-            local_map = local_map.unsqueeze(1)
-        map_features = self.local_map_conv(local_map)
-        map_features = map_features.view(batch_size, -1)
-        map_embedding = self.map_fc(map_features)
-        
-        # 编码动作
-        action_embedding = self.action_encoder(action)
-        
-        # 组合特征
-        combined_features = torch.cat([
-            current_node_features,
-            position_embedding,
-            target_embedding,
-            map_embedding,
-            action_embedding
-        ], dim=1)
-        
-        # 计算Q值
-        q_value = self.q_layer(combined_features)
-        
-        return q_value
-=======
 import math
-from parameter import *
-
+    
 # a pointer network layer for policy output
 class SingleHeadAttention(nn.Module):
     def __init__(self, embedding_dim):
@@ -518,4 +203,374 @@ class Decoder(nn.Module):
         for layer in self.layers:
             tgt, w = layer(tgt, memory, key_padding_mask=key_padding_mask, attn_mask=attn_mask)
         return tgt, w
->>>>>>> Continues
+
+class WaypointSelector(nn.Module):
+    def __init__(self, node_dim, embedding_dim):
+        super(WaypointSelector, self).__init__()
+        # viewpoint encoder, encode viewpoints graph into viewpoint feature
+        self.initial_embedding = nn.Linear(node_dim, embedding_dim)
+        self.viewpoint_encoder = Encoder(embedding_dim=embedding_dim, n_head=8, n_layer=6)
+        # current node decoder, decode current node feature from enhanced viewpoint feature
+        self.current_node_decoder = Decoder(embedding_dim=embedding_dim, n_head=8, n_layer=1)
+        self.current_embedding = nn.Linear(embedding_dim * 2, embedding_dim)
+
+        # pointer network, select waypoint from current node feature
+        self.pointer_network = SingleHeadAttention(embedding_dim)
+        
+    def encode_graph(self, node_inputs, node_padding_mask, edge_mask):
+        node_feature = self.initial_embedding(node_inputs)
+        enhanced_viewpoint_feature = self.viewpoint_encoder(src=node_feature, key_padding_mask=node_padding_mask, attn_mask=edge_mask)
+        return enhanced_viewpoint_feature
+    
+    def decode_state(self, enhanced_node_feature, current_index, node_padding_mask):
+        embedding_dim = enhanced_node_feature.size()[2]
+        current_node_feature = torch.gather(enhanced_node_feature, 1,
+                                                    current_index.repeat(1, 1, embedding_dim))
+        enhanced_current_node_feature, _ = self.current_node_decoder(current_node_feature,
+                                                                    enhanced_node_feature,
+                                                                    node_padding_mask)
+
+        return current_node_feature, enhanced_current_node_feature
+    
+    def output_logp(self, current_node_feature, enhanced_current_node_feature,
+                      enhanced_node_feature, current_edge, edge_padding_mask):
+        embedding_dim = enhanced_node_feature.size()[2]
+        # current_state_feature = current_node_feature
+        current_state_feature = self.current_embedding(torch.cat((enhanced_current_node_feature,
+                                                                current_node_feature), dim=-1))
+
+        neighboring_feature = torch.gather(enhanced_node_feature, 1,
+                                           current_edge.repeat(1, 1, embedding_dim))
+
+        logp = self.pointer_network(current_state_feature, neighboring_feature, edge_padding_mask)
+        logp = logp.squeeze(1)
+
+        return logp
+    
+    def forward(self, node_inputs, node_padding_mask, edge_mask, current_index,
+                current_edge, edge_padding_mask):
+        # encode graph
+        enhanced_viewpoint_feature = self.encode_graph(node_inputs, node_padding_mask, edge_mask)
+        current_node_feature, enhanced_current_node_feature = self.decode_state(enhanced_viewpoint_feature, current_index, node_padding_mask)
+        # select waypoint
+        waypoint_logp = self.output_logp(current_node_feature, enhanced_current_node_feature,
+                                          enhanced_viewpoint_feature, current_edge, edge_padding_mask)
+        return waypoint_logp
+    
+
+class LocalController(nn.Module):
+    def __init__(self, state_dim=8, hidden_dim=128):
+        """
+        底层运动控制器，负责生成到达目标路点的速度指令
+        
+        参数:
+            state_dim: 状态维度(机器人状态+目标路点信息)
+            hidden_dim: 隐藏层维度
+        """
+        super(LocalController, self).__init__()
+        
+        # 特征提取网络
+        self.feature_net = nn.Sequential(
+            nn.Linear(state_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU()
+        )
+        
+        # 均值网络（确定性部分）
+        self.mean_net = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim//2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim//2, 2)  # 输出线速度和角速度
+        )
+        
+        # 标准差网络（随机部分，用于探索）
+        self.log_std = nn.Sequential(
+            nn.Linear(hidden_dim, hidden_dim//2),
+            nn.ReLU(),
+            nn.Linear(hidden_dim//2, 2)
+        )
+        
+    def prepare_state(self, robot_state, target_waypoint):
+        """
+        准备控制器输入状态
+        
+        参数:
+            robot_state: [x, y, theta, v_linear, v_angular, ...]
+            target_waypoint: [x, y]
+        """
+        # 计算机器人到目标的向量
+        robot_pos = robot_state[:, :2]  # 机器人位置[x,y]
+        pos_diff = target_waypoint - robot_pos  # 位置差向量
+        
+        # 计算距离和方向
+        dist = torch.norm(pos_diff, dim=1, keepdim=True)  # 欧氏距离
+        target_angle = torch.atan2(pos_diff[:, 1], pos_diff[:, 0]).unsqueeze(1)  # 目标角度
+        
+        # 计算与当前朝向的角度差
+        heading = robot_state[:, 2].unsqueeze(1)  # 当前朝向角
+        angle_diff = target_angle - heading
+        # 归一化角度差到[-π, π]范围
+        angle_diff = torch.atan2(torch.sin(angle_diff), torch.cos(angle_diff))
+        
+        # 组合完整状态
+        full_state = torch.cat([
+            dist,                  # 到目标的距离
+            angle_diff,            # 朝向与目标方向的角度差
+            robot_state[:, 3:5],   # 当前线速度和角速度
+            robot_state,           # 完整机器人状态
+            target_waypoint        # 目标路点
+        ], dim=1)
+        
+        return full_state
+        
+    def forward(self, robot_state, target_waypoint):
+        """
+        前向传播，生成动作
+        
+        返回:
+            velocity: 线速度和角速度命令
+            mean: 动作均值
+            log_std: 动作对数标准差
+        """
+        # 准备状态输入
+        state = self.prepare_state(robot_state, target_waypoint)
+        
+        # 提取特征
+        features = self.feature_net(state)
+        
+        # 计算动作均值和标准差
+        mean = self.mean_net(features)
+        log_std = self.log_std(features)
+        log_std = torch.clamp(log_std, -20, 2)  # 限制标准差范围
+        std = torch.exp(log_std)
+        
+        # 在训练时采样动作
+        if self.training:
+            # 从正态分布采样
+            normal = torch.distributions.Normal(mean, std)
+            x_t = normal.rsample()  # 重参数化技巧
+            # 使用tanh压缩范围，提高训练稳定性
+            y_t = torch.tanh(x_t)
+            # 将动作映射到实际的速度范围
+            linear_vel = (y_t[:, 0] + 1) / 2 * MAX_LINEAR_VELOCITY  # [0, MAX]
+            angular_vel = y_t[:, 1] * MAX_ANGULAR_VELOCITY  # [-MAX, MAX]
+            velocity = torch.stack([linear_vel, angular_vel], dim=1)
+            return velocity, mean, log_std
+        else:
+            # 推理时直接使用均值
+            linear_vel = (torch.tanh(mean[:, 0]) + 1) / 2 * MAX_LINEAR_VELOCITY
+            angular_vel = torch.tanh(mean[:, 1]) * MAX_ANGULAR_VELOCITY
+            velocity = torch.stack([linear_vel, angular_vel], dim=1)
+            return velocity, mean, log_std
+    
+    def get_action_and_logprob(self, robot_state, target_waypoint):
+        """
+        计算动作和对应的对数概率
+        """
+        state = self.prepare_state(robot_state, target_waypoint)
+        features = self.feature_net(state)
+        
+        mean = self.mean_net(features)
+        log_std = self.log_std(features)
+        log_std = torch.clamp(log_std, -20, 2)
+        std = torch.exp(log_std)
+        
+        normal = torch.distributions.Normal(mean, std)
+        x_t = normal.rsample()
+        y_t = torch.tanh(x_t)
+        
+        # 计算对数概率
+        log_prob = normal.log_prob(x_t)
+        # 由于tanh变换，需要调整对数概率
+        log_prob -= torch.log(1 - y_t.pow(2) + 1e-6)
+        log_prob = log_prob.sum(1, keepdim=True)
+        
+        # 映射到实际速度
+        linear_vel = (y_t[:, 0] + 1) / 2 * MAX_LINEAR_VELOCITY
+        angular_vel = y_t[:, 1] * MAX_ANGULAR_VELOCITY
+        velocity = torch.stack([linear_vel, angular_vel], dim=1)
+        
+        return velocity, log_prob, mean, log_std
+    
+
+class WayPointQNet(nn.Module):
+    def __init__(self, node_dim, embedding_dim):
+        super(WayPointQNet, self).__init__()
+
+        # local graph encoder
+        self.initial_embedding = nn.Linear(node_dim, embedding_dim)
+        self.encoder = Encoder(embedding_dim=embedding_dim, n_head=8, n_layer=6)
+
+        # decoder
+        self.decoder = Decoder(embedding_dim=embedding_dim, n_head=8, n_layer=1)
+        self.current_embedding = nn.Linear(embedding_dim * 2, embedding_dim)
+
+        self.q_values_layer = nn.Linear(embedding_dim * 2, 1)
+
+    def encode_graph(self, node_inputs, node_padding_mask, edge_mask):
+        node_feature = self.initial_embedding(node_inputs)
+        enhanced_node_feature = self.encoder(src=node_feature,
+                                                         key_padding_mask=node_padding_mask,
+                                                         attn_mask=edge_mask)
+
+        return enhanced_node_feature
+
+    def decode_state(self, enhanced_node_feature, current_index, node_padding_mask):
+        embedding_dim = enhanced_node_feature.size()[2]
+        current_node_feature = torch.gather(enhanced_node_feature, 1,
+                                                  current_index.repeat(1, 1, embedding_dim))
+        enhanced_current_node_feature, _ = self.decoder(current_node_feature,
+                                                                    enhanced_node_feature,
+                                                                    node_padding_mask)
+
+        return current_node_feature, enhanced_current_node_feature
+
+    def output_q(self, current_node_feature, enhanced_current_node_feature, enhanced_node_feature,
+                 current_edge, edge_padding_mask):
+        embedding_dim = enhanced_node_feature.size()[2]
+        k_size = current_edge.size()[1]
+        # current_state_feature = current_node_feature
+        current_state_feature = self.current_embedding(torch.cat((enhanced_current_node_feature,
+                                                                 current_node_feature), dim=-1))
+
+        neighboring_feature = torch.gather(enhanced_node_feature, 1,
+                                           current_edge.repeat(1, 1, embedding_dim))
+
+        action_features = torch.cat((current_state_feature.repeat(1, k_size, 1), neighboring_feature), dim=-1)
+        q_values = self.q_values_layer(action_features)
+        return q_values
+
+    def forward(self, node_inputs, node_padding_mask, edge_mask, current_index,
+                current_edge, edge_padding_mask):
+        enhanced_node_feature = self.encode_graph(node_inputs, node_padding_mask, edge_mask)
+        current_node_feature, enhanced_current_node_feature = self.decode_state(enhanced_node_feature, current_index, node_padding_mask)
+        q_values = self.output_q(current_node_feature, enhanced_current_node_feature,
+                                 enhanced_node_feature, current_edge, edge_padding_mask)
+
+        return q_values
+
+class ControllerQNetwork(nn.Module):
+    def __init__(self, state_dim=8, action_dim=2, hidden_dim=128):
+        """
+        底层控制器的Q网络
+        评估状态-动作对的价值函数
+        
+        参数:
+            state_dim: 状态维度(机器人状态+目标路点)
+            action_dim: 动作维度(线速度和角速度)
+            hidden_dim: 隐藏层维度
+        """
+        super(ControllerQNetwork, self).__init__()
+        
+        # 双Q网络结构，提高训练稳定性
+        self.q1 = nn.Sequential(
+            nn.Linear(state_dim + action_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, 1)
+        )
+        
+        self.q2 = nn.Sequential(
+            nn.Linear(state_dim + action_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, 1)
+        )
+        
+        # 状态预处理，与LocalController共享
+        self.prepare_state = LocalController().prepare_state
+        
+    def forward(self, robot_state, target_waypoint, action):
+        """
+        计算状态-动作对的Q值
+        
+        参数:
+            robot_state: 机器人状态 [batch_size, state_dim]
+            target_waypoint: 目标路点 [batch_size, 2]
+            action: 速度命令 [batch_size, 2]
+            
+        返回:
+            q1, q2: 两个Q网络的估计值
+        """
+        # 准备状态表示
+        state = self.prepare_state(robot_state, target_waypoint)
+        
+        # 连接状态和动作
+        x = torch.cat([state, action], dim=1)
+        
+        # 计算两个Q值估计
+        q1 = self.q1(x)
+        q2 = self.q2(x)
+        
+        return q1, q2
+    
+    def min_q(self, robot_state, target_waypoint, action):
+        """返回两个Q网络估计的最小值，用于保守估计"""
+        q1, q2 = self.forward(robot_state, target_waypoint, action)
+        return torch.min(q1, q2)
+    
+
+# class DualStageAgent(nn.Module):
+#     """整合高层规划和底层控制的完整双阶段代理"""
+    
+#     def __init__(self, node_dim, robot_state_dim, embedding_dim=128):
+#         super(DualStageAgent, self).__init__()
+        
+#         # 高层路点选择器
+#         self.waypoint_selector = WaypointSelector(node_dim, embedding_dim)
+        
+#         # 底层运动控制器
+#         self.local_controller = LocalController(state_dim=robot_state_dim+4)  # +4是距离和角度差
+        
+#         # 训练模式标志
+#         self.training_high_level = True  # 控制训练哪一层
+        
+#     def forward(self, observation):
+#         """
+#         执行完整的双阶段决策过程
+        
+#         参数:
+#             observation: 包含图表示和机器人状态的观测字典
+            
+#         返回:
+#             waypoint: 选择的下一个路点
+#             velocity: 生成的速度命令
+#         """
+#         # 1. 高层规划 - 选择路点
+#         waypoint_logits = self.waypoint_selector(
+#             observation['node_inputs'],
+#             observation['node_padding_mask'],
+#             observation['edge_mask'],
+#             observation['current_index'],
+#             observation['current_edge'],
+#             observation['edge_padding_mask']
+#         )
+        
+#         # 根据logits选择路点 (训练时采样，推理时取最大值)
+#         if self.training:
+#             waypoint_dist = torch.distributions.Categorical(logits=waypoint_logits)
+#             waypoint_idx = waypoint_dist.sample()
+#         else:
+#             waypoint_idx = torch.argmax(waypoint_logits, dim=1)
+            
+#         # 提取选择的路点坐标 (假设前两维是xy坐标)
+#         selected_waypoint = torch.gather(
+#             observation['node_inputs'], 1,
+#             waypoint_idx.unsqueeze(1).unsqueeze(2).repeat(1, 1, 2)
+#         ).squeeze(1)[:, :2]
+        
+#         # 2. 底层控制 - 生成速度命令
+#         robot_state = observation['robot_state']
+#         velocity, mean, log_std = self.local_controller(robot_state, selected_waypoint)
+        
+#         return {
+#             'waypoint_idx': waypoint_idx,
+#             'waypoint': selected_waypoint,
+#             'velocity': velocity,
+#             'waypoint_logits': waypoint_logits,
+#             'velocity_mean': mean,
+#             'velocity_log_std': log_std
+#         }

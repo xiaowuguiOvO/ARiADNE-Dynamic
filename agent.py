@@ -228,39 +228,6 @@ class Agent:
         neighbor_indices = np.argwhere(adjacent_matrix[current_index] == 0).reshape(-1)
         return all_node_coords, utility, guidepost, adjacent_matrix, current_index, neighbor_indices, obstacle_velocities
 
-    # def get_obstacle_features(self, node_coords):
-    #     """计算每个节点的障碍物特征"""
-    #     n_node = len(node_coords)
-    #     # 初始化障碍物特征：[最近距离, 相对方向x, 相对方向y]
-    #     obstacle_features = np.ones((n_node, 3)) * 999  # 默认值设为大数字
-        
-    #     if not hasattr(self, 'env') or not hasattr(self.env, 'dynamic_obstacles') or len(self.env.dynamic_obstacles) == 0:
-    #         return obstacle_features
-        
-    #     # 计算每个节点的障碍物特征
-    #     for i, node_coord in enumerate(node_coords):
-    #         min_dist = float('inf')
-    #         closest_obs_vel = np.array([0.0, 0.0])
-            
-    #         for obs in self.env.dynamic_obstacles:
-    #             dist = np.linalg.norm(node_coord - obs['position'])
-                
-    #             # 更新最近障碍物信息
-    #             if dist < min_dist:
-    #                 min_dist = dist
-    #                 closest_obs_vel = obs['velocity']
-                    
-    #         # 归一化
-    #         if min_dist < UPDATING_MAP_SIZE:
-    #             obstacle_features[i, 0] = min_dist / UPDATING_MAP_SIZE  # 归一化距离
-    #             # 如果有最近的障碍物，记录其速度方向
-    #             vel_norm = np.linalg.norm(closest_obs_vel)
-    #             if vel_norm > 0:
-    #                 obstacle_features[i, 1] = closest_obs_vel[0] / vel_norm  # 归一化x方向
-    #                 obstacle_features[i, 2] = closest_obs_vel[1] / vel_norm  # 归一化y方向
-        
-    #     return obstacle_features
-
     def get_observation(self):
         node_coords = self.node_coords
         node_utility = self.utility.reshape(-1, 1)
