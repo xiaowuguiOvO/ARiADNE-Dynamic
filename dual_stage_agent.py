@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from model_dual_stage import WaypointSelector, LocalController
+from dual_stage_model import WaypointSelector, LocalController
 from parameter import *
 from node_manager import NodeManager
 import numpy as np
@@ -10,7 +10,7 @@ class DualStageAgent:
     def __init__(self, device='cpu'):
         self.device = device
         # self.waypoint_selector = WaypointSelector(device=device)  # 注释掉WaypointSelector初始化
-        self.local_controller = LocalController(device=device)
+        self.local_controller = LocalController()
 
         self.location = None
         self.map_info = None
@@ -33,13 +33,25 @@ class DualStageAgent:
         self.adjacent_matrix, self.neighbor_indices = None, None
         
         # 自身速度
-        self.velocity = np.array([0.0, 0.0])  # 当前速度        
+        # self.velocity = np.array([0.0, 0.0])  # 当前速度        
         self.nearest_node = None
         self.nearest_node_index = float('inf')
         
-        # target
-        self.target_waypoint = None
-        self.target_waypoint_dis = float('inf')
+        # robot state
+        self.v_linear = 0.0
+        self.v_angular = 0.0
+        self.distance_to_target = 0.0
+        self.heading_theta = 0.0
+        self.heading_theta_diff = 0.0
+        
+    def get_robot_state(self):
+        return [self.distance_to_target, self.heading_theta_diff, self.v_linear, self.v_angular]
+    
+    def update_robot_state(self, distance_to_target, heading_theta_diff, v_linear, v_angular):
+        self.distance_to_target = distance_to_target
+        self.heading_theta_diff = heading_theta_diff
+        self.v_linear = v_linear
+        self.v_angular = v_angular
         
     def update_map(self, map_info):
         self.map_info = map_info

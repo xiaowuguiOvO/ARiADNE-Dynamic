@@ -9,7 +9,7 @@ import random
 import time
 from copy import deepcopy
 
-from model_dual_stage import DualStageAgent, WaypointSelector, LocalController, WayPointQNet, ControllerQNetwork
+from dual_stage_model import DualStageAgent, WaypointSelector, LocalController, WayPointQNet, ControllerQNetwork
 from env import Env
 from dual_stage_agent import DualStageAgent
 from utils import *

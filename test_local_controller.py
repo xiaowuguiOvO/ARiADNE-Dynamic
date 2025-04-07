@@ -1,7 +1,8 @@
 import numpy as np
 import time
 from local_planner_env import LocalPlannerEnv
-
+from dual_stage_agent import DualStageAgent
+import torch
 def test_env_only(max_steps=200, render=True):
     """
     仅测试LocalPlannerEnv环境的基本功能
@@ -55,6 +56,35 @@ def test_env_only(max_steps=200, render=True):
     env.close()
     print("测试完成")
 
+def test_local_controller(max_steps=200, render=True):
+    """
+    测试LocalController的控制功能
+    """
+    # 创建环境
+    render_mode = 'human' if render else None
+    env = LocalPlannerEnv(
+        map_size=20.0,
+        target_radius=0.5,
+        max_steps=max_steps,
+        render_mode=render_mode
+    )
+    agent = DualStageAgent(device='cpu')
+    obs, info = env.reset()
+    print(f"init obs: {obs}")
+    x, y, theta, v_linear, v_angular, distance_to_target = obs['robot_state']
+    input_robot_state = np.array([distance_to_target, theta, v_linear, v_angular], dtype=np.float32)
+    input_robot_state = torch.tensor(input_robot_state, dtype=torch.float32)
+    print(f"input_robot_state: {input_robot_state}")
+    for step in range(max_steps):
+        action = agent.local_controller(input_robot_state)
+        action = action.detach().numpy()
+        action = np.array([1, 0.1])
+        print(f"action: {action}")
+        obs, reward, terminated, truncated, info = env.step(action)
+        if terminated or truncated:
+            break
+
 if __name__ == "__main__":
     # 运行测试
-    test_env_only(max_steps=300, render=True)
+    # test_env_only(max_steps=300, render=True)
+    test_local_controller(max_steps=300, render=True)

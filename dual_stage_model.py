@@ -259,141 +259,19 @@ class WaypointSelector(nn.Module):
     
 
 class LocalController(nn.Module):
-    def __init__(self, state_dim=8, hidden_dim=128):
-        """
-        底层运动控制器，负责生成到达目标路点的速度指令
-        
-        参数:
-            state_dim: 状态维度(机器人状态+目标路点信息)
-            hidden_dim: 隐藏层维度
-        """
+    def __init__(self, state_dim=4, action_dim=2):
         super(LocalController, self).__init__()
-        
-        # 特征提取网络
-        self.feature_net = nn.Sequential(
-            nn.Linear(state_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU()
-        )
-        
-        # 均值网络（确定性部分）
-        self.mean_net = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim//2),
-            nn.ReLU(),
-            nn.Linear(hidden_dim//2, 2)  # 输出线速度和角速度
-        )
-        
-        # 标准差网络（随机部分，用于探索）
-        self.log_std = nn.Sequential(
-            nn.Linear(hidden_dim, hidden_dim//2),
-            nn.ReLU(),
-            nn.Linear(hidden_dim//2, 2)
-        )
-        
-    def prepare_state(self, robot_state, target_waypoint):
-        """
-        准备控制器输入状态
-        
-        参数:
-            robot_state: [x, y, theta, v_linear, v_angular, ...]
-            target_waypoint: [x, y]
-        """
-        # 计算机器人到目标的向量
-        robot_pos = robot_state[:, :2]  # 机器人位置[x,y]
-        pos_diff = target_waypoint - robot_pos  # 位置差向量
-        
-        # 计算距离和方向
-        dist = torch.norm(pos_diff, dim=1, keepdim=True)  # 欧氏距离
-        target_angle = torch.atan2(pos_diff[:, 1], pos_diff[:, 0]).unsqueeze(1)  # 目标角度
-        
-        # 计算与当前朝向的角度差
-        heading = robot_state[:, 2].unsqueeze(1)  # 当前朝向角
-        angle_diff = target_angle - heading
-        # 归一化角度差到[-π, π]范围
-        angle_diff = torch.atan2(torch.sin(angle_diff), torch.cos(angle_diff))
-        
-        # 组合完整状态
-        full_state = torch.cat([
-            dist,                  # 到目标的距离
-            angle_diff,            # 朝向与目标方向的角度差
-            robot_state[:, 3:5],   # 当前线速度和角速度
-            robot_state,           # 完整机器人状态
-            target_waypoint        # 目标路点
-        ], dim=1)
-        
-        return full_state
-        
-    def forward(self, robot_state, target_waypoint):
-        """
-        前向传播，生成动作
-        
-        返回:
-            velocity: 线速度和角速度命令
-            mean: 动作均值
-            log_std: 动作对数标准差
-        """
-        # 准备状态输入
-        state = self.prepare_state(robot_state, target_waypoint)
-        
-        # 提取特征
-        features = self.feature_net(state)
-        
-        # 计算动作均值和标准差
-        mean = self.mean_net(features)
-        log_std = self.log_std(features)
-        log_std = torch.clamp(log_std, -20, 2)  # 限制标准差范围
-        std = torch.exp(log_std)
-        
-        # 在训练时采样动作
-        if self.training:
-            # 从正态分布采样
-            normal = torch.distributions.Normal(mean, std)
-            x_t = normal.rsample()  # 重参数化技巧
-            # 使用tanh压缩范围，提高训练稳定性
-            y_t = torch.tanh(x_t)
-            # 将动作映射到实际的速度范围
-            linear_vel = (y_t[:, 0] + 1) / 2 * MAX_LINEAR_VELOCITY  # [0, MAX]
-            angular_vel = y_t[:, 1] * MAX_ANGULAR_VELOCITY  # [-MAX, MAX]
-            velocity = torch.stack([linear_vel, angular_vel], dim=1)
-            return velocity, mean, log_std
-        else:
-            # 推理时直接使用均值
-            linear_vel = (torch.tanh(mean[:, 0]) + 1) / 2 * MAX_LINEAR_VELOCITY
-            angular_vel = torch.tanh(mean[:, 1]) * MAX_ANGULAR_VELOCITY
-            velocity = torch.stack([linear_vel, angular_vel], dim=1)
-            return velocity, mean, log_std
+        self.layer1 = nn.Linear(state_dim, 800)
+        self.layer2 = nn.Linear(800, 600)
+        self.layer3 = nn.Linear(600, action_dim)
+        self.tanh = nn.Tanh()
     
-    def get_action_and_logprob(self, robot_state, target_waypoint):
-        """
-        计算动作和对应的对数概率
-        """
-        state = self.prepare_state(robot_state, target_waypoint)
-        features = self.feature_net(state)
-        
-        mean = self.mean_net(features)
-        log_std = self.log_std(features)
-        log_std = torch.clamp(log_std, -20, 2)
-        std = torch.exp(log_std)
-        
-        normal = torch.distributions.Normal(mean, std)
-        x_t = normal.rsample()
-        y_t = torch.tanh(x_t)
-        
-        # 计算对数概率
-        log_prob = normal.log_prob(x_t)
-        # 由于tanh变换，需要调整对数概率
-        log_prob -= torch.log(1 - y_t.pow(2) + 1e-6)
-        log_prob = log_prob.sum(1, keepdim=True)
-        
-        # 映射到实际速度
-        linear_vel = (y_t[:, 0] + 1) / 2 * MAX_LINEAR_VELOCITY
-        angular_vel = y_t[:, 1] * MAX_ANGULAR_VELOCITY
-        velocity = torch.stack([linear_vel, angular_vel], dim=1)
-        
-        return velocity, log_prob, mean, log_std
+    def forward(self, state):
+        s = F.relu(self.layer1(state))
+        s = F.relu(self.layer2(s))
+        a = self.tanh(self.layer3(s))
+        return a
     
-
 class WayPointQNet(nn.Module):
     def __init__(self, node_dim, embedding_dim):
         super(WayPointQNet, self).__init__()
@@ -451,66 +329,36 @@ class WayPointQNet(nn.Module):
         return q_values
 
 class ControllerQNetwork(nn.Module):
-    def __init__(self, state_dim=8, action_dim=2, hidden_dim=128):
-        """
-        底层控制器的Q网络
-        评估状态-动作对的价值函数
-        
-        参数:
-            state_dim: 状态维度(机器人状态+目标路点)
-            action_dim: 动作维度(线速度和角速度)
-            hidden_dim: 隐藏层维度
-        """
+    def __init__(self, state_dim, action_dim):
         super(ControllerQNetwork, self).__init__()
-        
-        # 双Q网络结构，提高训练稳定性
-        self.q1 = nn.Sequential(
-            nn.Linear(state_dim + action_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, 1)
-        )
-        
-        self.q2 = nn.Sequential(
-            nn.Linear(state_dim + action_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, 1)
-        )
-        
-        # 状态预处理，与LocalController共享
-        self.prepare_state = LocalController().prepare_state
-        
-    def forward(self, robot_state, target_waypoint, action):
-        """
-        计算状态-动作对的Q值
-        
-        参数:
-            robot_state: 机器人状态 [batch_size, state_dim]
-            target_waypoint: 目标路点 [batch_size, 2]
-            action: 速度命令 [batch_size, 2]
-            
-        返回:
-            q1, q2: 两个Q网络的估计值
-        """
-        # 准备状态表示
-        state = self.prepare_state(robot_state, target_waypoint)
-        
-        # 连接状态和动作
-        x = torch.cat([state, action], dim=1)
-        
-        # 计算两个Q值估计
-        q1 = self.q1(x)
-        q2 = self.q2(x)
-        
+
+        self.layer_1 = nn.Linear(state_dim, 800)
+        self.layer_2_s = nn.Linear(800, 600)
+        self.layer_2_a = nn.Linear(action_dim, 600)
+        self.layer_3 = nn.Linear(600, 1)
+
+        self.layer_4 = nn.Linear(state_dim, 800)
+        self.layer_5_s = nn.Linear(800, 600)
+        self.layer_5_a = nn.Linear(action_dim, 600)
+        self.layer_6 = nn.Linear(600, 1)
+
+    def forward(self, s, a):
+        s1 = F.relu(self.layer_1(s))
+        self.layer_2_s(s1)
+        self.layer_2_a(a)
+        s11 = torch.mm(s1, self.layer_2_s.weight.data.t())
+        s12 = torch.mm(a, self.layer_2_a.weight.data.t())
+        s1 = F.relu(s11 + s12 + self.layer_2_a.bias.data)
+        q1 = self.layer_3(s1)
+
+        s2 = F.relu(self.layer_4(s))
+        self.layer_5_s(s2)
+        self.layer_5_a(a)
+        s21 = torch.mm(s2, self.layer_5_s.weight.data.t())
+        s22 = torch.mm(a, self.layer_5_a.weight.data.t())
+        s2 = F.relu(s21 + s22 + self.layer_5_a.bias.data)
+        q2 = self.layer_6(s2)
         return q1, q2
-    
-    def min_q(self, robot_state, target_waypoint, action):
-        """返回两个Q网络估计的最小值，用于保守估计"""
-        q1, q2 = self.forward(robot_state, target_waypoint, action)
-        return torch.min(q1, q2)
     
 
 # class DualStageAgent(nn.Module):

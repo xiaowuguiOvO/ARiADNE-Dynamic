@@ -16,13 +16,14 @@ class LocalPlannerEnv(gym.Env):
     """
     
     def __init__(self, 
-                 map_size=20.0,                # 地图大小(正方形)
+                 map_size=10.0,                # 地图大小(正方形)
                  target_radius=0.5,            # 目标点半径
                  max_steps=1000,               # 最大步数
                  dt=0.1,                       # 时间步长
-                 max_linear_velocity=2.0,      # 最大线速度
+                 max_linear_velocity=1.0,      # 最大线速度
                  max_angular_velocity=1.0,     # 最大角速度
-                 render_mode=None):            # 渲染模式
+                 render_mode=None,             # 渲染模式
+                 non_blocking_render=True):    # 是否使用非阻塞渲染（不抢占焦点）
         super().__init__()
         
         # 环境参数
@@ -33,12 +34,13 @@ class LocalPlannerEnv(gym.Env):
         self.max_linear_velocity = max_linear_velocity
         self.max_angular_velocity = max_angular_velocity
         self.render_mode = render_mode
+        self.non_blocking_render = non_blocking_render
         
-        # 状态空间：[x, y, theta, v_linear, v_angular]
+        # 状态空间：[x, y, theta, v_linear, v_angular, distance_to_target]
         self.observation_space = spaces.Dict({
             'robot_state': spaces.Box(
-                low=np.array([-map_size/2, -map_size/2, -np.pi, 0, -max_angular_velocity]),
-                high=np.array([map_size/2, map_size/2, np.pi, max_linear_velocity, max_angular_velocity]),
+                low=np.array([-map_size/2, -map_size/2, -np.pi, 0, -max_angular_velocity, 0]),
+                high=np.array([map_size/2, map_size/2, np.pi, max_linear_velocity, max_angular_velocity, np.sqrt(2)*map_size]),
                 dtype=np.float32
             ),
             'target_position': spaces.Box(
@@ -59,6 +61,8 @@ class LocalPlannerEnv(gym.Env):
         self.robot_state = None
         self.target_position = None
         self.steps = 0
+        self.previous_distance_to_target = 0
+        self.distance_to_target = 0
         
         # 渲染相关
         self.fig = None
@@ -69,13 +73,12 @@ class LocalPlannerEnv(gym.Env):
         super().reset(seed=seed)
         
         # 随机初始化机器人位置和朝向
+        self.total_reward = 0
         x = self.np_random.uniform(-self.map_size/2, self.map_size/2)
         y = self.np_random.uniform(-self.map_size/2, self.map_size/2)
         theta = self.np_random.uniform(-np.pi, np.pi)
         v_linear = 0.0
         v_angular = 0.0
-        
-        self.robot_state = np.array([x, y, theta, v_linear, v_angular], dtype=np.float32)
         
         # 随机生成目标点(确保与机器人初始位置有一定距离)
         while True:
@@ -84,11 +87,29 @@ class LocalPlannerEnv(gym.Env):
             target_pos = np.array([target_x, target_y], dtype=np.float32)
             
             # 计算与机器人的距离
-            dist = np.linalg.norm(target_pos - self.robot_state[:2])
+            dist = np.linalg.norm(target_pos - np.array([x, y]))
             if dist > 3.0:  # 确保初始目标点与机器人有一定距离
                 break
         
         self.target_position = target_pos
+        
+        # 计算到目标点的距离
+        distance_to_target = np.linalg.norm(self.target_position - np.array([x, y]))
+        self.distance_to_target = distance_to_target
+        self.previous_distance_to_target = distance_to_target
+        
+        # 计算目标方向
+        target_direction = np.arctan2(self.target_position[1] - y, self.target_position[0] - x)
+        
+        # 计算角度差 (目标方向 - 机器人朝向)
+        heading_diff = np.arctan2(np.sin(target_direction - theta), np.cos(target_direction - theta))
+        
+        # 保存机器人的真实朝向（用于内部计算）
+        self.robot_heading = theta
+        
+        # 更新机器人状态，使用角度差代替绝对朝向
+        self.robot_state = np.array([x, y, heading_diff, v_linear, v_angular, distance_to_target], dtype=np.float32)
+        
         self.steps = 0
         
         observation = {
@@ -106,52 +127,68 @@ class LocalPlannerEnv(gym.Env):
     def step(self, action):
         """执行动作并更新环境"""
         # 确保动作在合法范围内
+        done = False
         v_linear = np.clip(action[0], 0, self.max_linear_velocity)
         v_angular = np.clip(action[1], -self.max_angular_velocity, self.max_angular_velocity)
         action = np.array([v_linear, v_angular])
         
         # 更新机器人状态
-        x, y, theta, _, _ = self.robot_state
+        x, y, heading_diff, _, _, _ = self.robot_state
         
-        # 运动学模型更新位置和朝向
-        theta_new = theta + v_angular * self.dt
+        # 更新机器人真实朝向（内部使用）
+        self.robot_heading = self.robot_heading + v_angular * self.dt
         # 将角度标准化到[-pi, pi]
-        theta_new = np.arctan2(np.sin(theta_new), np.cos(theta_new))
+        self.robot_heading = np.arctan2(np.sin(self.robot_heading), np.cos(self.robot_heading))
         
-        x_new = x + v_linear * np.cos(theta_new) * self.dt
-        y_new = y + v_linear * np.sin(theta_new) * self.dt
+        # 使用真实朝向更新位置
+        x_new = x + v_linear * np.cos(self.robot_heading) * self.dt
+        y_new = y + v_linear * np.sin(self.robot_heading) * self.dt
         
         # 边界处理
         x_new = np.clip(x_new, -self.map_size/2, self.map_size/2)
         y_new = np.clip(y_new, -self.map_size/2, self.map_size/2)
         
-        # 更新状态
-        self.robot_state = np.array([x_new, y_new, theta_new, v_linear, v_angular], dtype=np.float32)
-        
         # 计算与目标点的距离
-        dist_to_target = np.linalg.norm(self.robot_state[:2] - self.target_position)
+        self.previous_distance_to_target = self.distance_to_target
+        dist_to_target = np.linalg.norm(np.array([x_new, y_new]) - self.target_position)
+        self.distance_to_target = dist_to_target
+        
+        # 计算目标方向
+        target_direction = np.arctan2(self.target_position[1] - y_new, self.target_position[0] - x_new)
+        
+        # 计算新的角度差（目标方向 - 机器人朝向）
+        heading_diff_new = np.arctan2(np.sin(target_direction - self.robot_heading), 
+                                      np.cos(target_direction - self.robot_heading))
+        
+        # 更新状态，使用新的角度差
+        self.robot_state = np.array([x_new, y_new, heading_diff_new, v_linear, v_angular, dist_to_target], dtype=np.float32)
         
         # 检查是否到达目标
-        reached_target = dist_to_target <= self.target_radius
+        reached_target = self.distance_to_target <= self.target_radius
         
-        # 计算奖励
-        reward = -0.1  # 每步的小惩罚，鼓励快速到达目标
+        # 计算奖励，基于接近程度和角度差减小程度
+        approach_reward = self.previous_distance_to_target - self.distance_to_target
+        angle_thresh = np.pi / 16
+        heading_reward = angle_thresh - abs(heading_diff_new)
+        # print(f"heading_reward: {heading_reward}")
+        
+        # 增加线速度奖励权重
+        forward_reward = v_linear * 1.5  # 提高前进奖励
+        # 朝向与前进结合的奖励
+        effective_progress = np.cos(heading_diff_new) * v_linear * 2.0
+        # 惩罚零速度状态（防止停止）
+        zero_velocity_penalty = -1.0 if v_linear < 0.1 else 0.0
+
+        # 计算总奖励
+        reward = approach_reward + heading_reward
         
         if reached_target:
-            reward += 10.0  # 到达目标的奖励
-            # 更新目标点位置
-            while True:
-                new_target_x = self.np_random.uniform(-self.map_size/2, self.map_size/2)
-                new_target_y = self.np_random.uniform(-self.map_size/2, self.map_size/2)
-                new_target_pos = np.array([new_target_x, new_target_y], dtype=np.float32)
-                
-                # 确保新目标与当前位置有一定距离
-                dist = np.linalg.norm(new_target_pos - self.robot_state[:2])
-                if dist > 3.0:
-                    break
-                    
-            self.target_position = new_target_pos
-        
+            reward += 100.0  # 到达目标的奖励
+            done = True
+            
+        # 保存当前奖励和角度信息用于显示
+        self.current_reward = f"{reward:.2f}"
+        self.total_reward += reward
         # 更新步数并检查是否结束
         self.steps += 1
         terminated = False
@@ -165,13 +202,14 @@ class LocalPlannerEnv(gym.Env):
         
         info = {
             'distance_to_target': dist_to_target,
-            'reached_target': reached_target
+            'reached_target': reached_target,
+            'heading_diff': heading_diff_new
         }
         
         if self.render_mode == 'human':
             self._render_frame()
             
-        return observation, reward, terminated, truncated, info
+        return observation, reward, terminated, truncated, info, done
     
     def render(self):
         """渲染环境"""
@@ -181,13 +219,21 @@ class LocalPlannerEnv(gym.Env):
     def _render_frame(self):
         """渲染当前帧"""
         if self.fig is None:
-            plt.ion()
+            # 设置matplotlib后端和关闭交互模式
+            import matplotlib
+            matplotlib.use('TkAgg')  # 使用TkAgg后端
+            plt.ioff()  # 关闭交互模式，避免自动显示和抢占焦点
+            
+            # 创建图形，但不显示
             self.fig, self.ax = plt.subplots(figsize=(8, 8))
             self.ax.set_xlim(-self.map_size/2 - 1, self.map_size/2 + 1)
             self.ax.set_ylim(-self.map_size/2 - 1, self.map_size/2 + 1)
             self.ax.set_aspect('equal')
             self.ax.grid(True)
             plt.title('Local Planner Environment')
+            
+            # 手动显示图形，但不激活窗口
+            self.fig.show()
         
         self.ax.clear()
         self.ax.set_xlim(-self.map_size/2 - 1, self.map_size/2 + 1)
@@ -199,17 +245,22 @@ class LocalPlannerEnv(gym.Env):
                      [-self.map_size/2, -self.map_size/2, self.map_size/2, self.map_size/2, -self.map_size/2],
                      'k-', linewidth=2)
         
-        # 绘制机器人
-        x, y, theta, v_linear, v_angular = self.robot_state
+        # 获取机器人信息
+        x, y, heading_diff, v_linear, v_angular, distance_to_target = self.robot_state
         
         # 机器人圆形表示
         robot_circle = Circle((x, y), 0.3, color='blue', alpha=0.7)
         self.ax.add_patch(robot_circle)
         
-        # 机器人朝向
+        # 使用真实朝向绘制机器人方向
         length = 0.5
-        self.ax.arrow(x, y, length * np.cos(theta), length * np.sin(theta),
+        self.ax.arrow(x, y, length * np.cos(self.robot_heading), length * np.sin(self.robot_heading),
                       head_width=0.2, head_length=0.2, fc='red', ec='red')
+        
+        # 绘制目标方向
+        target_direction = np.arctan2(self.target_position[1] - y, self.target_position[0] - x)
+        self.ax.arrow(x, y, length * np.cos(target_direction), length * np.sin(target_direction),
+                      head_width=0.15, head_length=0.15, fc='green', ec='green')
         
         # 绘制目标点
         target_circle = Circle((self.target_position[0], self.target_position[1]), 
@@ -218,12 +269,25 @@ class LocalPlannerEnv(gym.Env):
         
         # 添加信息文本
         dist = np.linalg.norm(self.robot_state[:2] - self.target_position)
-        info_text = f"步数: {self.steps}\n到目标距离: {dist:.2f}"
+        
+        # 如果还没有定义reward属性，初始化为N/A
+        if not hasattr(self, 'current_reward'):
+            self.current_reward = "N/A"
+            
+        heading_diff_deg = np.degrees(heading_diff)
+        heading_deg = np.degrees(self.robot_heading)
+        target_dir_deg = np.degrees(target_direction)
+        
+        info_text = f"step: {self.steps}\ntarget_dis: {dist:.2f}\nreward: {self.current_reward}\ntotal_reward: {self.total_reward:.2f}\nheading: {heading_deg:.2f}°\ntarget_dir: {target_dir_deg:.2f}°\nheading_diff: {heading_diff_deg:.2f}°\nlinear_vel: {v_linear:.2f}\nangular_vel: {v_angular:.2f}"
         self.ax.text(-self.map_size/2 + 0.5, self.map_size/2 - 1, info_text,
                      fontsize=10, bbox=dict(facecolor='white', alpha=0.5))
         
-        plt.draw()
-        plt.pause(0.001)
+        # 使用canvas更新而不是plt.draw()和plt.pause()
+        self.fig.canvas.draw_idle()
+        self.fig.canvas.flush_events()
+        # 使用一个小延迟，但不会抢占焦点
+        import time
+        time.sleep(0.01)
         
     def close(self):
         """关闭环境"""
@@ -241,7 +305,7 @@ def test_env():
     for _ in range(100):
         # 随机动作
         action = env.action_space.sample()
-        obs, reward, terminated, truncated, info = env.step(action)
+        obs, reward, terminated, truncated, info, done = env.step(action)
         
         print(f"Reward: {reward}, Distance: {info['distance_to_target']:.2f}")
         
@@ -252,4 +316,4 @@ def test_env():
 
 
 if __name__ == "__main__":
-    test_env() 
+    test_env()
