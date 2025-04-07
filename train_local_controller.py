@@ -203,7 +203,7 @@ eval_ep = 10  # number of episodes for evaluation
 max_timesteps = 5e6  # Maximum number of steps to perform
 expl_noise = 1  # Initial exploration noise starting value in range [expl_min ... 1]
 expl_decay_steps = (
-    500000  # Number of steps over which the initial exploration noise will decay over
+    5000  # Number of steps over which the initial exploration noise will decay over
 )
 expl_min = 0.1  # Exploration noise after the decay in range [0...expl_noise]
 batch_size = 40  # Size of the mini-batch
@@ -392,6 +392,7 @@ while timestep < MAX_TIME_STEPS:
         action = action.cpu().numpy().squeeze()
     if expl_noise > expl_min:
         expl_noise = expl_noise - ((expl_noise - expl_min) / expl_decay_steps)
+        print(f"expl_noise: {expl_noise}")
     action = (action + np.random.normal(0, expl_noise, size=action_dim)).clip(-max_action, max_action)
     
     # action = np.array([1, 0.1])
