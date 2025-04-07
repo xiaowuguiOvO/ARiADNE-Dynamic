@@ -198,12 +198,12 @@ class TD3(object):
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")  # cuda or cpu
 seed = 0  # Random seed number
 eval_freq = 5e3  # After how many steps to perform the evaluation
-max_ep = 400  # maximum number of steps per episode
+max_ep = 200  # maximum number of steps per episode
 eval_ep = 10  # number of episodes for evaluation
 max_timesteps = 5e6  # Maximum number of steps to perform
 expl_noise = 1  # Initial exploration noise starting value in range [expl_min ... 1]
 expl_decay_steps = (
-    5000  # Number of steps over which the initial exploration noise will decay over
+    1000  # Number of steps over which the initial exploration noise will decay over
 )
 expl_min = 0.1  # Exploration noise after the decay in range [0...expl_noise]
 batch_size = 40  # Size of the mini-batch
@@ -356,27 +356,27 @@ while timestep < MAX_TIME_STEPS:
             )
             
             # 每隔固定episode保存一次模型
-            if episode_num % save_episode_interval == 0:
-                save_path = f"./saved_models/model_episode_{episode_num}"
-                if not os.path.exists(save_path):
-                    os.makedirs(save_path)
-                network.save(f"episode_{episode_num}", save_path)
+            # if episode_num % save_episode_interval == 0:
+            #     save_path = f"./saved_models/model_episode_{episode_num}"
+            #     if not os.path.exists(save_path):
+            #         os.makedirs(save_path)
+            #     network.save(f"episode_{episode_num}", save_path)
                 
-                # 保存训练信息
-                training_stats = {
-                    "episode": episode_num,
-                    "total_timesteps": timestep,
-                    "average_reward": sum(training_info["episode_rewards"][-save_episode_interval:])/save_episode_interval if len(training_info["episode_rewards"]) >= save_episode_interval else sum(training_info["episode_rewards"])/len(training_info["episode_rewards"]),
-                    "best_reward": training_info["best_reward"],
-                    "best_episode": training_info["best_episode"]
-                }
+            #     # 保存训练信息
+            #     training_stats = {
+            #         "episode": episode_num,
+            #         "total_timesteps": timestep,
+            #         "average_reward": sum(training_info["episode_rewards"][-save_episode_interval:])/save_episode_interval if len(training_info["episode_rewards"]) >= save_episode_interval else sum(training_info["episode_rewards"])/len(training_info["episode_rewards"]),
+            #         "best_reward": training_info["best_reward"],
+            #         "best_episode": training_info["best_episode"]
+            #     }
                 
-                # 将训练信息保存为json文件
-                import json
-                with open(f"{save_path}/training_stats.json", 'w') as f:
-                    json.dump(training_stats, f, indent=4)
+            #     # 将训练信息保存为json文件
+            #     import json
+            #     with open(f"{save_path}/training_stats.json", 'w') as f:
+            #         json.dump(training_stats, f, indent=4)
                 
-                print(f"模型已保存：episode_{episode_num}, 平均奖励: {training_stats['average_reward']:.2f}")
+            #     print(f"模型已保存：episode_{episode_num}, 平均奖励: {training_stats['average_reward']:.2f}")
                 
         env.reset()
         done = False
@@ -392,7 +392,7 @@ while timestep < MAX_TIME_STEPS:
         action = action.cpu().numpy().squeeze()
     if expl_noise > expl_min:
         expl_noise = expl_noise - ((expl_noise - expl_min) / expl_decay_steps)
-        print(f"expl_noise: {expl_noise}")
+        
     action = (action + np.random.normal(0, expl_noise, size=action_dim)).clip(-max_action, max_action)
     
     # action = np.array([1, 0.1])

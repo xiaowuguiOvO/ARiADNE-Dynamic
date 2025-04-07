@@ -168,19 +168,12 @@ class LocalPlannerEnv(gym.Env):
         
         # 计算奖励，基于接近程度和角度差减小程度
         approach_reward = self.previous_distance_to_target - self.distance_to_target
-        angle_thresh = np.pi / 16
+        angle_thresh = 0
         heading_reward = angle_thresh - abs(heading_diff_new)
-        # print(f"heading_reward: {heading_reward}")
-        
-        # 增加线速度奖励权重
-        forward_reward = v_linear * 1.5  # 提高前进奖励
-        # 朝向与前进结合的奖励
-        effective_progress = np.cos(heading_diff_new) * v_linear * 2.0
-        # 惩罚零速度状态（防止停止）
-        zero_velocity_penalty = -1.0 if v_linear < 0.1 else 0.0
 
+        speed_reward = action[0] * 1.0
         # 计算总奖励
-        reward = approach_reward + heading_reward
+        reward = approach_reward + heading_reward + speed_reward
         
         if reached_target:
             reward += 100.0  # 到达目标的奖励

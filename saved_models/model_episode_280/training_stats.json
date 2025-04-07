@@ -1,7 +1,7 @@
 {
     "episode": 280,
-    "total_timesteps": 35221,
-    "average_reward": 75.74304041113507,
-    "best_reward": 124.27675616771882,
-    "best_episode": 204
+    "total_timesteps": 25379,
+    "average_reward": 96.98192304927771,
+    "best_reward": 132.1587477072473,
+    "best_episode": 44
 }
