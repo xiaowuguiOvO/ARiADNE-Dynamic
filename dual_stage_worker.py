@@ -104,16 +104,24 @@ class DualStageWorker:
                 next_waypoint, action_index = self.robot.select_next_waypoint(observation)
                 need_decision = False
                 self.robot.update_waypoint(next_waypoint)
+                # decompose waypoint to path points
+                self.robot.decompose_path_to_waypoint()
+                self.robot.current_path_index = 0
+                print(f"path_points: {self.robot.path_points}")
                 # self.robot.update_waypoint([4, -4])
 
-            velocity, state = self.robot.cal_next_velocity()
+            velocity, state = self.robot.cal_next_velocity(self.robot.path_points[self.robot.current_path_index])
+            
             self.robot.update_robot_state(state[0], state[1], state[2], state[3])
             # velocity = [1, 1]
             self.robot.update_velocity(velocity)
             # check arrive waypoint
-            if self.robot.check_arrive_waypoint():
+            if self.robot.check_arrive_waypoint(self.robot.waypoint):
                 need_decision = True
                 print("arrive waypoint, need decision")
+            if self.robot.check_arrive_waypoint(self.robot.path_points[self.robot.current_path_index]):
+                print("arrive path point, go to next path point")
+                self.robot.current_path_index += 1
             # print(f"velocity: {velocity}, state: {state}, next_waypoint: {next_waypoint}")
 
             # 可视化

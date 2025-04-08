@@ -130,9 +130,8 @@ class NodeManager:
         h = np.linalg.norm(np.array([coords_1[0] - coords_2[0], coords_1[1] - coords_2[1]]))
         # h = np.round(h, 2)
         return h
-
     def a_star(self, start, destination, max_dist=None):
-        # the path does not include the start
+        # 前面部分代码保持不变
         if not self.check_node_exist_in_dict(start):
             print(start)
             Warning("start position is not in node dict")
@@ -151,6 +150,9 @@ class NodeManager:
 
         open_heap = []
         heapq.heappush(open_heap, (0, (start[0], start[1])))
+
+        # 定义直接相邻的距离阈值（通常为NODE_RESOLUTION的1.5倍）
+        direct_neighbor_threshold = NODE_RESOLUTION * 1.5
 
         while len(open_list) > 0:
             _, n = heapq.heappop(open_heap)
@@ -171,17 +173,26 @@ class NodeManager:
 
                 return path, np.round(length, 2)
 
-            costs = np.linalg.norm(np.array(list(node.neighbor_set)).reshape(-1, 2) - [n_coords[0], n_coords[1]],
-                                   axis=1)
-            for cost, neighbor_node_coords in zip(costs, node.neighbor_set):
-                m = (neighbor_node_coords[0], neighbor_node_coords[1])
+            # 修改这里：筛选直接相邻的节点
+            neighbor_array = np.array(list(node.neighbor_set)).reshape(-1, 2)
+            node_array = np.array([n_coords[0], n_coords[1]])
+            distances = np.linalg.norm(neighbor_array - node_array, axis=1)
+            
+            # 只保留直接相邻的节点(距离小于阈值)
+            direct_neighbor_indices = distances <= direct_neighbor_threshold
+            direct_neighbors = neighbor_array[direct_neighbor_indices]
+            direct_costs = distances[direct_neighbor_indices]
+
+            # 处理这些直接相邻的节点
+            for cost, neighbor_coords in zip(direct_costs, direct_neighbors):
+                m = (neighbor_coords[0], neighbor_coords[1])
                 if m not in open_list and m not in closed_list:
                     open_list.add(m)
                     parents[m] = n
                     g[m] = g[n] + cost
                     heapq.heappush(open_heap, (g[m], m))
                 else:
-                    if g[m] > g[n] + cost:
+                    if m in g and g[m] > g[n] + cost:
                         g[m] = g[n] + cost
                         parents[m] = n
 
@@ -189,7 +200,6 @@ class NodeManager:
             closed_list.add(n)
 
         print('Path does not exist!')
-
         return [], 1e8
 
 

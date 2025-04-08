@@ -41,6 +41,11 @@ class DualStageAgent:
         self.nearest_node_index = float('inf')
         
         self.waypoint = [0, 0]
+        self.path_points = []
+        self.current_path_index = 0
+        
+        self.use_path_following = True
+        
         # robot state
         self.v_linear = 0.0
         self.v_angular = 0.0
@@ -68,8 +73,9 @@ class DualStageAgent:
         self.v_linear = v_linear
         self.v_angular = v_angular
     
-    def check_arrive_waypoint(self):
-        if self.distance_to_target < WAYPOINT_THRESHOLD:
+    def check_arrive_waypoint(self, waypoint):
+        # print(f"waypoint distance: {self.cal_dist_to_waypoint(waypoint)}")
+        if self.cal_dist_to_waypoint(waypoint) < WAYPOINT_THRESHOLD:
             return True
         else:
             return False
@@ -304,9 +310,9 @@ class DualStageAgent:
         # self.next_waypoint_index = waypoint_index
         return next_waypoint, waypoint_index
     
-    def cal_next_velocity(self):
-        distance_to_target = self.cal_dist_to_waypoint()
-        heading_theta_diff = self.cal_heading_theta_diff_to_waypoint()
+    def cal_next_velocity(self, waypoint):
+        distance_to_target = self.cal_dist_to_waypoint(waypoint)
+        heading_theta_diff = self.cal_heading_theta_diff_to_waypoint(waypoint)
         state = np.array([distance_to_target, 
                          heading_theta_diff,
                          self.v_linear, 
@@ -320,17 +326,17 @@ class DualStageAgent:
     def update_velocity(self, velocity):
         self.v_linear = velocity[0]
         self.v_angular = velocity[1]
-    def cal_dist_to_waypoint(self):
+    def cal_dist_to_waypoint(self, waypoint):
         # print(f"self.location: {self.location}, self.waypoint: {self.waypoint}")
-        return np.linalg.norm(self.location - self.waypoint)
+        return np.linalg.norm(self.location - waypoint)
 
-    def cal_heading_theta_to_waypoint(self):
-        return np.arctan2(self.waypoint[1] - self.location[1], self.waypoint[0] - self.location[0])
+    def cal_heading_theta_to_waypoint(self, waypoint):
+        return np.arctan2(waypoint[1] - self.location[1], waypoint[0] - self.location[0])
 
-    def cal_heading_theta_diff_to_waypoint(self):
+    def cal_heading_theta_diff_to_waypoint(self, waypoint):
         # 计算指向目标点的绝对方向
-        target_direction = np.arctan2(self.waypoint[1] - self.location[1], 
-                                      self.waypoint[0] - self.location[0])
+        target_direction = np.arctan2(waypoint[1] - self.location[1], 
+                                      waypoint[0] - self.location[0])
         # 获取机器人当前朝向（假设已在某处存储）
         current_heading = self.heading_theta  # 或者其他存储当前朝向的变量
         # 计算角度差，并标准化到[-π, π]范围
@@ -339,6 +345,57 @@ class DualStageAgent:
         return self.heading_theta_diff
 
     
+    def decompose_path_to_waypoint(self):
+        """
+        使用A*算法将目标waypoint分解成一系列小的路径点
+        """
+        # 清空之前的路径
+        self.path_points = []
+        self.current_path_index = 0
+        # 获取当前位置最近的节点作为起点
+        if self.location is None:
+            print("机器人位置未设置，无法规划路径")
+            return
+        # 更新最近节点
+        self.update_nearest_node()
+        if self.nearest_node is None:
+            print("找不到起点节点，无法规划路径")
+            return
+        start_coords = [self.nearest_node.x, self.nearest_node.y]
+        # 获取目标点最近的节点
+        # 确保 waypoint 是列表格式
+        waypoint_list = self.waypoint.tolist() if isinstance(self.waypoint, np.ndarray) else list(self.waypoint)
+        nearest_to_waypoint = self.node_manager.nodes_dict.nearest_neighbors(
+            waypoint_list, count=1)
+        if not nearest_to_waypoint or len(nearest_to_waypoint) == 0:
+            print("找不到终点节点，无法规划路径")
+            return
+        end_node = nearest_to_waypoint[0]
+        end_coords = [end_node.x, end_node.y]
+        # 使用A*算法计算路径
+        path, path_length = self.node_manager.a_star(start_coords, end_coords)
+        if not path or len(path) == 0:
+            print(f"无法找到从 {start_coords} 到 {end_coords} 的路径")
+            # 如果找不到路径，直接使用目标点
+            self.path_points = [np.array(self.waypoint)]
+        else:
+            # self.path_points.append(np.array(start_coords))
+            # 添加中间路径点
+            for point in path:
+                self.path_points.append(np.array(point))
+            # 添加终点（确保最后的目标是原始的waypoint而不是最近节点）
+            if np.linalg.norm(np.array(self.waypoint) - np.array(end_coords)) > 0.1:
+                self.path_points.append(np.array(self.waypoint))
+        # 设置当前目标为第一个路径点
+        if len(self.path_points) > 0:
+            self.current_target = self.path_points[0]
+            self.current_path_index = 0
+        else:
+            self.current_target = np.array(self.waypoint)
+        
+        print(f"路径规划完成，共 {len(self.path_points)} 个路径点")
+        return self.path_points
+        
     def plot_env(self, waypoint_index=None):
         plt.switch_backend('agg')
         plt.figure(figsize=(18, 5))
@@ -358,7 +415,22 @@ class DualStageAgent:
         # 添加朝向箭头
         plt.quiver(robot[0], robot[1], np.cos(self.heading_theta), np.sin(self.heading_theta), 
                     color='m', scale=32, zorder=5)
-    
+            # 绘制分解后的路径
+        if self.use_path_following and len(self.path_points) > 0:
+            path_points = np.array(self.path_points)
+            path_points_cells = (path_points - np.array([self.map_info.map_origin_x, self.map_info.map_origin_y])) / self.cell_size
+            # 绘制路径线
+            plt.plot(path_points_cells[:, 0], path_points_cells[:, 1], 'g-', linewidth=2, zorder=3)
+            # 绘制路径点
+            plt.scatter(path_points_cells[:, 0], path_points_cells[:, 1], c='g', s=30, zorder=4)
+            # 标记当前目标点
+            current_target = None
+            if self.current_path_index < len(path_points):
+                current_target = self.path_points[self.current_path_index]
+            if current_target is not None:
+                current_target_cell = (current_target - np.array([self.map_info.map_origin_x, self.map_info.map_origin_y])) / self.cell_size
+                plt.scatter(current_target_cell[0], current_target_cell[1], c='c', s=80, marker='*', zorder=6)
+
         # # 添加动态障碍物到中间子图
         # if hasattr(self, 'env') and hasattr(self.env, 'dynamic_obstacles'):
         #     for obs in self.env.dynamic_obstacles:
@@ -400,6 +472,22 @@ class DualStageAgent:
         plt.plot(robot[0], robot[1], 'mo', markersize=8, zorder=5)
         plt.quiver(robot[0], robot[1], np.cos(self.heading_theta), np.sin(self.heading_theta), 
             color='m', scale=32, zorder=5)
+        # 绘制分解后的路径
+        if self.use_path_following and len(self.path_points) > 0:
+            path_points = np.array(self.path_points)
+            path_points_cells = (path_points - np.array([self.map_info.map_origin_x, self.map_info.map_origin_y])) / self.cell_size
+            # 绘制路径线
+            plt.plot(path_points_cells[:, 0], path_points_cells[:, 1], 'g-', linewidth=2, zorder=3)
+            # 绘制路径点
+            plt.scatter(path_points_cells[:, 0], path_points_cells[:, 1], c='g', s=30, zorder=4)
+            # 标记当前目标点
+            current_target = None
+            if self.current_path_index < len(path_points):
+                current_target = self.path_points[self.current_path_index]
+            if current_target is not None:
+                current_target_cell = (current_target - np.array([self.map_info.map_origin_x, self.map_info.map_origin_y])) / self.cell_size
+                plt.scatter(current_target_cell[0], current_target_cell[1], c='c', s=80, marker='*', zorder=6)
+
         # # 添加动态障碍物到右侧子图
         # if hasattr(self, 'env') and hasattr(self.env, 'dynamic_obstacles'):
         #     for obs in self.env.dynamic_obstacles:

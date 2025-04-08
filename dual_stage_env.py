@@ -304,7 +304,8 @@ class Env:
                 next_cell_y < 0 or next_cell_y >= self.robot_belief.shape[0] or
                 self.robot_belief[next_cell_y, next_cell_x] != 255):  # 使用robot_belief检查障碍物
                 # 如果会碰到墙
-                wall_collision = True
+                # wall_collision = True
+                pass
         
         # 保存原始控制命令用于记录
         self.velocity_command = velocity_command  # [linear, angular]
@@ -352,8 +353,8 @@ class Env:
             self.collision_count += 1
             
         # 检查是否需要新决策 - 如果机器人与Waypoint距离小于预制
-        if self.agent.check_arrive_waypoint():
-            need_decision = True
+        # if self.agent.check_arrive_waypoint(self.agent.waypoint):
+        #     need_decision = True
         
         # need_decision = True
         # if (self.distance_since_last_decision >= self.decision_distance or
