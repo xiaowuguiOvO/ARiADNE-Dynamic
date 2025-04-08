@@ -6,12 +6,15 @@ from parameter import *
 from node_manager import NodeManager
 import numpy as np
 from utils import *
+import matplotlib.pyplot as plt
 class DualStageAgent:
-    def __init__(self, device='cpu'):
+    def __init__(self, device='cpu', LOAD_LOCAL_CONTROLLER=False):
         self.device = device
-        # self.waypoint_selector = WaypointSelector(device=device)  # 注释掉WaypointSelector初始化
+        self.waypoint_selector = WaypointSelector(node_dim=NODE_INPUT_DIM, embedding_dim=EMBEDDING_DIM)  
         self.local_controller = LocalController()
-
+        self.LOAD_LOCAL_CONTROLLER = LOAD_LOCAL_CONTROLLER
+        if self.LOAD_LOCAL_CONTROLLER:
+            self._load_local_controller()
         self.location = None
         self.map_info = None
         
@@ -31,19 +34,31 @@ class DualStageAgent:
         # graph
         self.node_coords, self.utility, self.guidepost = None, None, None
         self.adjacent_matrix, self.neighbor_indices = None, None
-        
+        self.next_waypoint_index = None
         # 自身速度
         # self.velocity = np.array([0.0, 0.0])  # 当前速度        
         self.nearest_node = None
         self.nearest_node_index = float('inf')
         
+        self.waypoint = [0, 0]
         # robot state
         self.v_linear = 0.0
         self.v_angular = 0.0
         self.distance_to_target = 0.0
         self.heading_theta = 0.0
         self.heading_theta_diff = 0.0
-        
+    
+    def update_waypoint(self, waypoint):
+        self.waypoint = waypoint
+    
+    def _load_local_controller(self):
+        # 先创建模型实例
+        self.local_controller = LocalController(state_dim=4, action_dim=2).to(self.device)
+        # 然后加载状态字典
+        state_dict = torch.load(LOCAL_CONTROLLER_PATH, map_location=self.device)
+        self.local_controller.load_state_dict(state_dict)
+        self.local_controller.eval()  # 设置为评估模式
+    
     def get_robot_state(self):
         return [self.distance_to_target, self.heading_theta_diff, self.v_linear, self.v_angular]
     
@@ -52,7 +67,13 @@ class DualStageAgent:
         self.heading_theta_diff = heading_theta_diff
         self.v_linear = v_linear
         self.v_angular = v_angular
-        
+    
+    def check_arrive_waypoint(self):
+        if self.distance_to_target < WAYPOINT_THRESHOLD:
+            return True
+        else:
+            return False
+    
     def update_map(self, map_info):
         self.map_info = map_info
     
@@ -139,17 +160,32 @@ class DualStageAgent:
         return False
     
     def update_frontiers(self):
-        """简单的更新前沿点方法，仅用于测试"""
-        # 在测试LocalController时不需要实际的前沿点，设置为空
-        self.frontier = set()
-        return
+        self.frontier = get_frontier_in_map(self.updating_map_info)
     
+
     def update_planning_state(self, global_map_info, location):
         self.update_map(global_map_info)
-        self.update_updating_map(location)
         self.update_location(location)
+        # self.location = location
+        # self.update_nearest_node()
+        self.update_updating_map(self.location)
+        self.update_frontiers()
+        self.node_manager.update_graph(self.location,
+                                       self.frontier,
+                                       self.updating_map_info,
+                                       self.map_info)
+        node = self.node_manager.nodes_dict.find(location.tolist())
+        if node is not None:
+            node.data.set_visited()
+        self.node_coords, self.utility, self.guidepost, self.adjacent_matrix, self.current_index, self.neighbor_indices, self.obstacle_velocities = \
+            self.update_observation()
+    def update_planning_state_use_nearest_node(self, global_map_info, location):
+        self.update_map(global_map_info)
+        # self.update_location(location)
+        self.location = location
         self.update_nearest_node()
         nearest_node_location = np.array([self.nearest_node.x, self.nearest_node.y])
+        self.update_updating_map(nearest_node_location)
         self.update_frontiers()
         self.node_manager.update_graph(nearest_node_location,
                                        self.frontier,
@@ -157,7 +193,7 @@ class DualStageAgent:
                                        self.map_info)
         self.node_coords, self.utility, self.guidepost, self.adjacent_matrix, self.current_index, self.neighbor_indices, self.obstacle_velocities = \
             self.update_observation()
-        
+
     def update_observation(self):
         all_node_coords = []
         for node in self.node_manager.nodes_dict.__iter__():
@@ -260,6 +296,118 @@ class DualStageAgent:
 
     def select_next_waypoint(self, observation):
         node_inputs, node_padding_mask, edge_mask, current_index, current_edge, edge_padding_mask = observation
-        waypoint_logp = self.waypoint_selector(node_inputs, node_padding_mask, edge_mask, current_index, current_edge, edge_padding_mask)
-        return waypoint_logp
+        with torch.no_grad():
+            waypoint_logp = self.waypoint_selector(node_inputs, node_padding_mask, edge_mask, current_index, current_edge, edge_padding_mask)
+        
+        waypoint_index = torch.multinomial(waypoint_logp.exp(), 1).long().squeeze(1)
+        next_waypoint = self.node_coords[waypoint_index]
+        # self.next_waypoint_index = waypoint_index
+        return next_waypoint, waypoint_index
     
+    def cal_next_velocity(self):
+        distance_to_target = self.cal_dist_to_waypoint()
+        heading_theta_diff = self.cal_heading_theta_diff_to_waypoint()
+        state = np.array([distance_to_target, 
+                         heading_theta_diff,
+                         self.v_linear, 
+                         self.v_angular])
+                
+        with torch.no_grad(): 
+            velocity = self.local_controller(torch.FloatTensor(state).to(self.device))
+        velocity = velocity.cpu().numpy()
+        return velocity, state
+
+    def update_velocity(self, velocity):
+        self.v_linear = velocity[0]
+        self.v_angular = velocity[1]
+    def cal_dist_to_waypoint(self):
+        # print(f"self.location: {self.location}, self.waypoint: {self.waypoint}")
+        return np.linalg.norm(self.location - self.waypoint)
+
+    def cal_heading_theta_to_waypoint(self):
+        return np.arctan2(self.waypoint[1] - self.location[1], self.waypoint[0] - self.location[0])
+
+    def cal_heading_theta_diff_to_waypoint(self):
+        # 计算指向目标点的绝对方向
+        target_direction = np.arctan2(self.waypoint[1] - self.location[1], 
+                                      self.waypoint[0] - self.location[0])
+        # 获取机器人当前朝向（假设已在某处存储）
+        current_heading = self.heading_theta  # 或者其他存储当前朝向的变量
+        # 计算角度差，并标准化到[-π, π]范围
+        self.heading_theta_diff = np.arctan2(np.sin(target_direction - current_heading), 
+                                 np.cos(target_direction - current_heading))
+        return self.heading_theta_diff
+
+    
+    def plot_env(self, waypoint_index=None):
+        plt.switch_backend('agg')
+        plt.figure(figsize=(18, 5))
+        
+        plt.subplot(1, 3, 2)
+        nodes = get_cell_position_from_coords(self.node_coords, self.map_info)
+        if len(self.frontier) > 0:
+            frontiers = get_cell_position_from_coords(np.array(list(self.frontier)), self.map_info).reshape(-1, 2)
+            plt.scatter(frontiers[:, 0], frontiers[:, 1], c='r', s=2)
+        robot = get_cell_position_from_coords(self.location, self.map_info)
+        plt.imshow(self.map_info.map, cmap='gray', origin='lower')
+        plt.axis('off')
+        plt.scatter(nodes[:, 0], nodes[:, 1], c=self.utility, zorder=2)
+        for node, utility in zip(nodes, self.utility):
+            plt.text(node[0], node[1], str(utility), zorder=3)
+        plt.plot(robot[0], robot[1], 'mo', markersize=8, zorder=5)
+        # 添加朝向箭头
+        plt.quiver(robot[0], robot[1], np.cos(self.heading_theta), np.sin(self.heading_theta), 
+                    color='m', scale=32, zorder=5)
+    
+        # # 添加动态障碍物到中间子图
+        # if hasattr(self, 'env') and hasattr(self.env, 'dynamic_obstacles'):
+        #     for obs in self.env.dynamic_obstacles:
+        #         # 转换障碍物位置到栅格坐标
+        #         cell_x = int((obs['position'][0] - self.map_info.map_origin_x) / self.map_info.cell_size)
+        #         cell_y = int((obs['position'][1] - self.map_info.map_origin_y) / self.map_info.cell_size)
+        #         # 画出障碍物圆形 - 使用更明显的颜色和更大的尺寸
+        #         circle = plt.Circle((cell_x, cell_y), OBSTACLE_RADIUS * 1.5 / self.cell_size,  # 增加半径
+        #                             color='red', alpha=0.7, zorder=4)  # 使用红色
+        #         plt.gca().add_patch(circle)
+        #         # 画出障碍物路径 - 使用红色虚线
+        #         path_x = [int((obs['waypoint1'][0] - self.map_info.map_origin_x) / self.map_info.cell_size),
+        #                 int((obs['waypoint2'][0] - self.map_info.map_origin_x) / self.map_info.cell_size)]
+        #         path_y = [int((obs['waypoint1'][1] - self.map_info.map_origin_y) / self.map_info.cell_size),
+        #                 int((obs['waypoint2'][1] - self.map_info.map_origin_y) / self.map_info.cell_size)]
+        #         plt.plot(path_x, path_y, 'r--', alpha=0.5, zorder=2)  # 红色虚线表示运动路径
+# 画所有节点
+        for coords in self.node_coords:
+            # 画节点之间的路径
+            node = self.node_manager.nodes_dict.find(coords.tolist()).data
+            for neighbor_coords in node.neighbor_set:
+                end = (np.array(neighbor_coords) - coords) / 2 + coords
+                plt.plot((np.array([coords[0], end[0]]) - self.map_info.map_origin_x) / self.cell_size,
+                        (np.array([coords[1], end[1]]) - self.map_info.map_origin_y) / self.cell_size, 'tan', zorder=1)
+
+        # 绘制目标点 (waypoint)
+        # print(self.waypoint[0], self.waypoint[1])
+        plt.scatter((self.waypoint[0] - self.map_info.map_origin_x) / self.cell_size, 
+                    (self.waypoint[1] - self.map_info.map_origin_y) / self.cell_size, 
+                    c='blue', s=50, zorder=4)
+
+        plt.subplot(1, 3, 3)
+        plt.imshow(self.map_info.map, cmap='gray', origin='lower')
+        plt.axis('off')
+        plt.scatter(nodes[:, 0], nodes[:, 1], c=self.guidepost, zorder=2)
+        plt.scatter((self.waypoint[0] - self.map_info.map_origin_x) / self.cell_size, 
+            (self.waypoint[1] - self.map_info.map_origin_y) / self.cell_size, 
+            c='blue', s=50, zorder=4)
+        plt.plot(robot[0], robot[1], 'mo', markersize=8, zorder=5)
+        plt.quiver(robot[0], robot[1], np.cos(self.heading_theta), np.sin(self.heading_theta), 
+            color='m', scale=32, zorder=5)
+        # # 添加动态障碍物到右侧子图
+        # if hasattr(self, 'env') and hasattr(self.env, 'dynamic_obstacles'):
+        #     for obs in self.env.dynamic_obstacles:
+        #         # 转换障碍物位置到栅格坐标
+        #         cell_x = int((obs['position'][0] - self.map_info.map_origin_x) / self.map_info.cell_size)
+        #         cell_y = int((obs['position'][1] - self.map_info.map_origin_y) / self.map_info.cell_size)
+                
+        #         # 画出障碍物圆形 - 使用更明显的颜色和更大的尺寸
+        #         circle = plt.Circle((cell_x, cell_y), OBSTACLE_RADIUS * 1.5 / self.cell_size,  # 增加半径
+        #                             color='red', alpha=0.7, zorder=4)  # 使用红色
+        #         plt.gca().add_patch(circle)

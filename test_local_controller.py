@@ -42,7 +42,7 @@ def test_model():
     
     # 设置设备
     device = torch.device("cpu") if args.force_cpu else torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"使用设备: {device}")
+    print(f"Using device: {device}")
     
     # 初始化环境
     render_mode = 'human' if args.render else None
@@ -81,33 +81,33 @@ def test_model():
         model_loaded = False
         for model_file in possible_model_files:
             if os.path.exists(model_file):
-                print(f"尝试加载模型: {model_file}")
+                print(f"Attempting to load model: {model_file}")
                 # 显式地将模型移到正确的设备上
                 model_weights = torch.load(model_file, map_location=device)
                 agent.local_controller.load_state_dict(model_weights)
                 agent.local_controller = agent.local_controller.to(device)  # 确保整个模型在指定设备上
-                print(f"成功加载模型: {model_file} 到设备: {device}")
+                print(f"Successfully loaded model: {model_file} to device: {device}")
                 
                 # 检查模型权重是否有效
                 valid_weights = True
                 for name, param in agent.local_controller.named_parameters():
                     if torch.isnan(param).any():
-                        print(f"警告: 模型参数 {name} 包含NaN值")
+                        print(f"Warning: Model parameter {name} contains NaN values")
                         valid_weights = False
                     if torch.isinf(param).any():
-                        print(f"警告: 模型参数 {name} 包含无穷值")
+                        print(f"Warning: Model parameter {name} contains infinite values")
                         valid_weights = False
                 
                 if valid_weights:
-                    print("模型权重检查通过，所有参数正常")
+                    print("Model weight check passed, all parameters are normal")
                     model_loaded = True
                     break
                 else:
-                    print("模型权重检查失败，尝试其他模型文件")
+                    print("Model weight check failed, trying other model files")
                     continue
         
         if not model_loaded:
-            print("所有尝试都失败，无法加载有效的模型文件")
+            print("All attempts failed, unable to load valid model file")
             return
         
         agent.local_controller.eval()  # 设置为评估模式
@@ -140,10 +140,10 @@ def test_model():
         done = False
         steps = 0
         
-        print(f"\n开始 Episode {episode+1}/{args.episodes}")
-        print(f"初始位置: ({x:.2f}, {y:.2f}), 朝向: {np.degrees(theta):.2f}°")
-        print(f"目标位置: ({obs['target_position'][0]:.2f}, {obs['target_position'][1]:.2f})")
-        print(f"到目标的距离: {distance_to_target:.2f}")
+        print(f"\nStarting Episode {episode+1}/{args.episodes}")
+        print(f"Initial position: ({x:.2f}, {y:.2f}), Orientation: {np.degrees(theta):.2f}°")
+        print(f"Target position: ({obs['target_position'][0]:.2f}, {obs['target_position'][1]:.2f})")
+        print(f"Distance to target: {distance_to_target:.2f}")
         
         # 记录每个episode的动作和状态
         action_history = []
@@ -157,7 +157,7 @@ def test_model():
                 
                 # 打印当前状态用于调试
                 if steps % 20 == 0:
-                    print(f"Debug - 当前状态: {current_state}")
+                    print(f"Debug - Current state: {current_state}")
                 
                 # 使用模型预测动作，确保数据在正确的设备上
                 current_state_tensor = torch.tensor(current_state, dtype=torch.float32).to(device)
@@ -171,7 +171,7 @@ def test_model():
                     action = agent.local_controller(current_state_tensor)
                     # 打印原始动作用于调试
                     if steps % 20 == 0:
-                        print(f"Debug - 模型输出动作: {action.cpu().numpy().squeeze()}")
+                        print(f"Debug - Model output action: {action.cpu().numpy().squeeze()}")
                     action = action.cpu().numpy().squeeze()
                 
                 # 记录动作
@@ -179,23 +179,24 @@ def test_model():
                 
                 # 执行动作
                 try:
+                    # action = [1, 1]
                     obs, reward, terminated, truncated, info, done = env.step(action)
                     
                     # 打印每一步的信息
                     if steps % 5 == 0:
-                        print(f"  步骤 {steps}: 动作=[{action[0]:.2f}, {action[1]:.2f}], 奖励={reward:.2f}")
+                        print(f"  Step {steps}: Action=[{action[0]:.2f}, {action[1]:.2f}], Reward={reward:.2f}")
                 except Exception as step_error:
-                    print(f"环境step调用出错: {step_error}")
-                    print(f"动作值: {action}")
+                    print(f"Environment step call error: {step_error}")
+                    print(f"Action values: {action}")
                     # 尝试使用有效的动作继续
                     action = np.clip(action, -1.0, 1.0)  # 确保动作在有效范围内
                     if np.isnan(action).any():  # 检查是否有NaN值
                         action = np.array([0.5, 0.0])  # 使用安全的默认动作
-                        print("检测到NaN动作，使用默认动作代替")
+                        print("NaN action detected, using default action instead")
                     try:
                         obs, reward, terminated, truncated, info, done = env.step(action)
                     except:
-                        print("即使使用安全动作仍然失败，结束episode")
+                        print("Failed even with safe action, ending episode")
                         done = True
                         break
                 
@@ -204,8 +205,8 @@ def test_model():
                     x, y, theta, v_linear, v_angular, distance_to_target = obs['robot_state']
                     agent.update_robot_state(distance_to_target, theta, v_linear, v_angular)
                 except Exception as state_error:
-                    print(f"更新状态出错: {state_error}")
-                    print(f"观察值: {obs}")
+                    print(f"Error updating state: {state_error}")
+                    print(f"Observation: {obs}")
                     done = True
                     break
                 
@@ -214,24 +215,24 @@ def test_model():
                 
                 # 每10步打印一次状态
                 if steps % 10 == 0:
-                    print(f"Step {steps}: 位置=({x:.2f}, {y:.2f}), 朝向={np.degrees(theta):.2f}°, "
-                          f"线速度={v_linear:.2f}, 角速度={v_angular:.2f}, "
-                          f"距离={distance_to_target:.2f}, 奖励={reward:.2f}")
+                    print(f"Step {steps}: Position=({x:.2f}, {y:.2f}), Orientation={np.degrees(theta):.2f}°, "
+                          f"Linear velocity={v_linear:.2f}, Angular velocity={v_angular:.2f}, "
+                          f"Distance={distance_to_target:.2f}, Reward={reward:.2f}")
                 
             except Exception as e:
-                print(f"执行步骤时发生错误: {e}")
-                print(f"当前状态: {current_state}")
+                print(f"Error during step execution: {e}")
+                print(f"Current state: {current_state}")
                 try:
-                    print(f"设备信息 - 模型: {next(agent.local_controller.parameters()).device}, 输入: {current_state_tensor.device}")
+                    print(f"Device info - Model: {next(agent.local_controller.parameters()).device}, Input: {current_state_tensor.device}")
                 except:
-                    print("无法获取设备信息")
+                    print("Unable to get device information")
                 done = True
                 break
                 
             if terminated or truncated or steps >= args.max_steps:
                 success = info.get('reached_target', False)
-                print(f"Episode {episode+1} 结束: {'成功' if success else '失败'}")
-                print(f"总步数: {steps}, 总奖励: {total_reward:.2f}")
+                print(f"Episode {episode+1} ended: {'Success' if success else 'Failed'}")
+                print(f"Total steps: {steps}, Total reward: {total_reward:.2f}")
                 
                 if success:
                     success_count += 1
@@ -276,17 +277,17 @@ def test_model():
                 break
     
     # 打印测试统计
-    print("\n===== 测试统计 =====")
-    print(f"测试episodes数: {args.episodes}")
-    print(f"成功率: {success_count}/{args.episodes} = {success_count/args.episodes*100:.2f}%")
+    print("\n===== Test Statistics =====")
+    print(f"Number of test episodes: {args.episodes}")
+    print(f"Success rate: {success_count}/{args.episodes} = {success_count/args.episodes*100:.2f}%")
     
     # 添加空数组检查
     if len(episode_steps) > 0:
-        print(f"平均步数: {np.mean(episode_steps):.2f}")
-        print(f"平均奖励: {np.mean(episode_rewards):.2f}")
-        print(f"最高奖励: {np.max(episode_rewards):.2f}")
+        print(f"Average steps: {np.mean(episode_steps):.2f}")
+        print(f"Average reward: {np.mean(episode_rewards):.2f}")
+        print(f"Highest reward: {np.max(episode_rewards):.2f}")
     else:
-        print("警告: 没有完成任何episode，无法计算统计数据")
+        print("Warning: No episodes completed, cannot calculate statistics")
     
     # 关闭环境
     env.close()
@@ -295,7 +296,7 @@ def test_env_only(max_steps=200, render=True):
     """
     仅测试环境功能，使用固定动作
     """
-    print("\n===== 测试环境功能 =====")
+    print("\n===== Testing Environment Functions =====")
     # 初始化环境
     render_mode = 'human' if render else None
     env = LocalPlannerEnv(
@@ -308,8 +309,8 @@ def test_env_only(max_steps=200, render=True):
     
     # 重置环境
     obs, info = env.reset()
-    print(f"初始观察: {obs['robot_state']}")
-    print(f"目标位置: {obs['target_position']}")
+    print(f"Initial observation: {obs['robot_state']}")
+    print(f"Target position: {obs['target_position']}")
     
     # 使用固定动作进行测试
     total_reward = 0
@@ -328,14 +329,14 @@ def test_env_only(max_steps=200, render=True):
         
         # 检查是否结束
         if terminated or truncated:
-            print(f"环境测试在步骤 {step} 结束")
+            print(f"Environment test ended at step {step}")
             success = info.get('reached_target', False)
-            print(f"{'成功到达目标' if success else '未到达目标'}")
+            print(f"{'Successfully reached target' if success else 'Failed to reach target'}")
             break
     
-    print(f"环境测试总奖励: {total_reward:.2f}")
+    print(f"Total environment test reward: {total_reward:.2f}")
     env.close()
-    print("环境测试完成")
+    print("Environment test completed")
     return True
 
 if __name__ == "__main__":

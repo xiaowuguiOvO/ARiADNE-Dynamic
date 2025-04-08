@@ -47,11 +47,13 @@ class Env:
         self.step_size = STEP_SIZE
         self.decision_interval = DECISION_INTERVAL
         self.decision_distance = DECISION_DISTANCE
+        self.waypoint_threshold = WAYPOINT_THRESHOLD
         self.distance_since_last_decision = 0.0
         self.time_since_last_decision = 0.0
         
         self.velocity_command = np.array([0.0, 0.0])
         self.total_reward = 0.0
+    
     def set_agent(self, agent):
         self.agent = agent
 
@@ -271,18 +273,11 @@ class Env:
         """
         if self.agent is None:
             raise ValueError("必须先使用set_agent设置代理")
-            
-        # 从agent获取当前速度 [linear, angular]
-        velocity_command = self.agent.velocity
-        # print("velocity_command: ", velocity_command)
-        # 确保velocity_command是正确的形状 (2,)
-        if isinstance(velocity_command, np.ndarray) and velocity_command.shape != (2,):
-            velocity_command = velocity_command.reshape(-1)  # 展平成一维数组
         
-        # 获取线速度和角速度
-        linear_vel = velocity_command[0]
-        angular_vel = velocity_command[1]
-        
+        linear_vel = self.agent.v_linear
+        angular_vel = self.agent.v_angular
+        velocity_command = np.array([linear_vel, angular_vel])
+        # print(f"velocity_command: {velocity_command}")
         # 初始化机器人朝向(如果不存在)
         if not hasattr(self, 'robot_orientation'):
             self.robot_orientation = 0.0  # 初始朝向
@@ -291,7 +286,7 @@ class Env:
         self.robot_orientation += angular_vel * self.step_size
         # 标准化到 [-π, π]
         self.robot_orientation = np.arctan2(np.sin(self.robot_orientation), np.cos(self.robot_orientation))
-        
+        self.agent.heading_theta = self.robot_orientation
         # 使用线速度和朝向计算x,y方向的速度分量
         vx = linear_vel * np.cos(self.robot_orientation)
         vy = linear_vel * np.sin(self.robot_orientation)
@@ -356,14 +351,20 @@ class Env:
             collision = True
             self.collision_count += 1
             
-        # 检查是否需要新决策 - 基于距离或时间
-        if (self.distance_since_last_decision >= self.decision_distance or
-            self.time_since_last_decision >= self.decision_interval):
+        # 检查是否需要新决策 - 如果机器人与Waypoint距离小于预制
+        if self.agent.check_arrive_waypoint():
             need_decision = True
+        
+        # need_decision = True
+        # if (self.distance_since_last_decision >= self.decision_distance or
+        #     self.time_since_last_decision >= self.decision_interval):
+        #     # need_decision = True
+        #     pass
+            
             
         # 更新机器人的信念地图（在一定间隔或碰撞时）
-        if need_decision or collision:
-            self.update_robot_belief()
+        # if need_decision or collision:
+        self.update_robot_belief()
         
         # 累计总移动距离
         self.travel_dist += total_dist
@@ -379,11 +380,11 @@ class Env:
             self.distance_since_last_decision = 0.0
             self.time_since_last_decision = 0.0
             
-        return reward, collision, need_decision
+        return reward, collision
 
     def plot_env(self, step):
         plt.subplot(1, 3, 1)
-        plt.imshow(self.robot_belief, cmap='gray')
+        plt.imshow(self.robot_belief, cmap='gray', origin='lower')
         plt.axis('off')
         
         # 绘制机器人和轨迹
@@ -394,40 +395,32 @@ class Env:
                 (np.array(self.trajectory_y) - self.belief_origin_y) / self.cell_size, 
                 'b', linewidth=2, zorder=1)
         
-        # 绘制动态障碍物 - 使用更明显的颜色和更大的尺寸
-        for obs in self.dynamic_obstacles:
-            # 转换障碍物位置到栅格坐标
-            x = (obs['position'][0] - self.belief_origin_x) / self.cell_size
-            y = (obs['position'][1] - self.belief_origin_y) / self.cell_size
+        # # 绘制动态障碍物 - 使用更明显的颜色和更大的尺寸
+        # for obs in self.dynamic_obstacles:
+        #     # 转换障碍物位置到栅格坐标
+        #     x = (obs['position'][0] - self.belief_origin_x) / self.cell_size
+        #     y = (obs['position'][1] - self.belief_origin_y) / self.cell_size
             
-            # 画出障碍物的圆形范围 - 使用更明显的颜色和更大的半径
-            circle = plt.Circle((x, y), OBSTACLE_RADIUS * 1.5 / self.cell_size,  # 增加半径
-                                color='red', alpha=0.7, zorder=4)  # 使用红色
-            plt.gca().add_patch(circle)
+        #     # 画出障碍物的圆形范围 - 使用更明显的颜色和更大的半径
+        #     circle = plt.Circle((x, y), OBSTACLE_RADIUS * 1.5 / self.cell_size,  # 增加半径
+        #                         color='red', alpha=0.7, zorder=4)  # 使用红色
+        #     plt.gca().add_patch(circle)
             
-            # 画出障碍物的运动路径 - 使用红色虚线
-            path_x = [(obs['waypoint1'][0] - self.belief_origin_x) / self.cell_size,
-                    (obs['waypoint2'][0] - self.belief_origin_x) / self.cell_size]
-            path_y = [(obs['waypoint1'][1] - self.belief_origin_y) / self.cell_size,
-                    (obs['waypoint2'][1] - self.belief_origin_y) / self.cell_size]
-            plt.plot(path_x, path_y, 'r--', alpha=0.5, zorder=2)  # 红色虚线表示运动路径
+        #     # 画出障碍物的运动路径 - 使用红色虚线
+        #     path_x = [(obs['waypoint1'][0] - self.belief_origin_x) / self.cell_size,
+        #             (obs['waypoint2'][0] - self.belief_origin_x) / self.cell_size]
+        #     path_y = [(obs['waypoint1'][1] - self.belief_origin_y) / self.cell_size,
+        #             (obs['waypoint2'][1] - self.belief_origin_y) / self.cell_size]
+        #     plt.plot(path_x, path_y, 'r--', alpha=0.5, zorder=2)  # 红色虚线表示运动路径
             
-            # 画出运动方向箭头 - 使用红色
-            # arrow_length = 2.0  # 箭头长度缩放因子
-            # dx = obs['velocity'][0] * arrow_length / self.cell_size
-            # dy = obs['velocity'][1] * arrow_length / self.cell_size
-            # plt.arrow(x, y, dx, dy, 
-            #           head_width=0.3, head_length=0.5, 
-            #           fc='red', ec='red', alpha=0.7, zorder=4)
-        
-        
-        plt.suptitle('Explored: {:.4g}  Distance: {:.4g}  Collisions: {}  Linear: {:.2f} Angular: {:.2f} Total Reward: {:.2f}'.format(
+        plt.suptitle('Explored: {:.4g}  Distance: {:.4g}  Collisions: {}  Linear: {:.2f} Angular: {:.2f} Total Reward: {:.2f} Heading: {:.2f}'.format(
             self.explored_rate, 
             self.travel_dist, 
             self.collision_count,
             self.velocity_command[0],
             self.velocity_command[1],
-            self.total_reward
+            self.total_reward,
+            self.agent.heading_theta
         ))
         plt.tight_layout()
         plt.savefig('{}/{}_{}_samples.png'.format(gifs_path, self.episode_index, step), dpi=150)

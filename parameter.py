@@ -10,8 +10,8 @@ LOAD_MODEL = False  # do you want to load the model trained before
 SAVE_IMG_GAP = 40  # how many episodes before saving a gif
 
 # map and planning resolution
-CELL_SIZE = 0.2  # meter, your map resolution
-NODE_RESOLUTION = 2.0  # meter, your node resolution
+CELL_SIZE = 0.1  # meter, your map resolution
+NODE_RESOLUTION = 1  # meter, your node resolution
 FRONTIER_CELL_SIZE = 2 * CELL_SIZE  # do you want to downsample the frontiers
 
 # map representation
@@ -33,11 +33,11 @@ MINIMUM_BUFFER_SIZE = 100
 BATCH_SIZE = 64
 LR = 1e-5
 GAMMA = 1
-NUM_META_AGENT = 16  # how many threads does your CPU have
+NUM_META_AGENT = 8  # how many threads does your CPU have
 
 # network parameters
 # NODE_INPUT_DIM = 4
-NODE_INPUT_DIM = 6  #node_x, node_y, node_utility, node_guidepost, obstacle_velocity_x, obstacle_velocity_y
+NODE_INPUT_DIM = 4  #node_x, node_y, node_utility, node_guidepost, obstacle_velocity_x, obstacle_velocity_y
 EMBEDDING_DIM = 128
 
 # Graph parameters
@@ -67,7 +67,7 @@ OBSTACLE_CURVE_MAX_DIST = 20  # 最大障碍物轨迹距离
 # 时间和频率控制
 MAX_EPISODE_STEP = 1280
 MAX_EPISODE_TIME = 300.0         # 最大模拟时间(秒)
-STEP_SIZE = 0.01                 # 仿真时间步长(秒)
+STEP_SIZE = 0.2               # 仿真时间步长(秒)
 DECISION_INTERVAL = 0.1         # 决策间隔时间(秒)
 DECISION_DISTANCE = 2.0          # 决策距离阈值(米)
 VISUALIZATION_INTERVAL = 20     # 可视化帧间隔(步数)
@@ -77,10 +77,12 @@ VISUALIZATION_INTERVAL = 20     # 可视化帧间隔(步数)
 MAX_LINEAR_VELOCITY = 6 * SPEED_SCALE
 MIN_LINEAR_VELOCITY = 0.5
 MAX_ANGULAR_VELOCITY = 1.0 * SPEED_SCALE
-
+WAYPOINT_THRESHOLD = 0.3
 # 目标网络更新参数
 TARGET_UPDATE_INTERVAL = 10  # 每隔多少步更新一次目标网络
 TAU = 0.005  # 软更新比例
 SAVE_INTERVAL = 100  # 每隔多少轮保存一次模型
 
 ENTROPY_TARGET = -2.0  
+
+LOCAL_CONTROLLER_PATH = 'saved_models/best_model/actor_good.pth'

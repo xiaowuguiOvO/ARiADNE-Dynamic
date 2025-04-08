@@ -205,14 +205,12 @@ def check_collision(start, end, map_info):
 def make_gif(path, n, frame_files, rate, fps=10):
     # 计算每帧持续时间（秒）
     duration = 1.0 / fps
-    
     with imageio.get_writer('{}/{}_explored_rate_{:.4g}.gif'.format(path, n, rate), 
                            mode='I', duration=duration) as writer:
         for frame in frame_files:
             image = imageio.imread(frame)
             writer.append_data(image)
     print('gif exploration_rate: {:.4g} complete\n'.format(rate))
-
     # Remove files
     for filename in frame_files[:-1]:
         os.remove(filename)
