@@ -14,6 +14,9 @@ from dual_stage_env import Env  # 从正确的文件导入Env类
 from dual_stage_agent import DualStageAgent
 from utils import *
 from parameter import *
+from io import BytesIO
+from PIL import Image
+import matplotlib.pyplot as plt
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 Experience = namedtuple('Experience',
                         ['node_inputs', 'node_padding_mask', 'edge_mask', 'current_index',
@@ -27,13 +30,13 @@ Experience = namedtuple('Experience',
 
 
 class DualStageWorker:
-    def __init__(self, meta_agent_id, global_step, device='cpu', save_image=False):
+    def __init__(self, meta_agent_id, global_step, device='cpu', save_image=False, random_wapoint=False, train_local_controller=True):
         self.meta_agent_id = meta_agent_id
         self.global_step = global_step
         self.save_image = save_image
         self.device = device
-
-        self.env = Env(global_step, plot=save_image)
+        self.train_local_controller = True
+        self.env = Env(global_step, plot=save_image, random_wapoint=random_wapoint)
         self.robot = DualStageAgent(device=self.device, LOAD_LOCAL_CONTROLLER=True)
         self.robot.env = self.env
         self.waypoint_index = None
@@ -68,15 +71,14 @@ class DualStageWorker:
         self.episode_buffer[12] += current_index
         self.episode_buffer[13] += current_edge
         self.episode_buffer[14] += edge_padding_mask.bool()
-
+    
     def run_episode(self):
         done = False
         need_decision = True
-        save_exp = False
         simulation_time = 0.0
         self.env.set_agent(self.robot)
         self.robot.update_planning_state(self.env.belief_info, self.env.robot_location)
-
+        self.frams = []
         max_simulation_time = MAX_EPISODE_TIME
         step_count = 0
         if self.save_image:
@@ -92,13 +94,17 @@ class DualStageWorker:
             self.robot.update_planning_state_use_nearest_node(self.env.belief_info, self.env.robot_location)
             
             # select next waypoint
+            next_waypoint = None
             if need_decision:
-                next_waypoint, action_index = self.robot.select_next_waypoint(observation)
+                if self.env.random_wapoint:
+                    success, next_waypoint = self.env.generate_random_waypoint()
+                else:
+                    next_waypoint, action_index = self.robot.select_next_waypoint(observation)
+                    
                 need_decision = False
                 save_exp = True
                 self.robot.update_waypoint(next_waypoint)
-                # decompose waypoint to path points
-                self.robot.decompose_path_to_waypoint()
+                    # self.robot.decompose_path_to_waypoint()
                 self.robot.current_path_index = 0
                 # print(f"path_points: {self.robot.path_points}")
                 # self.robot.update_waypoint([4, -4])
@@ -115,7 +121,7 @@ class DualStageWorker:
             # if self.robot.check_arrive_waypoint(self.robot.path_points[self.robot.current_path_index]):
             #     self.robot.current_path_index += 1
             
-            if save_exp:
+            if save_exp and not self.train_local_controller:
                 self.save_observation(observation)
                 self.save_action(action_index)
                 next_observation = self.robot.get_observation()
@@ -127,7 +133,8 @@ class DualStageWorker:
             if self.save_image:
                 self.env.plot_env(step_count)
                 self.robot.plot_env(self.robot.next_waypoint_index)
-                
+
+            
         self.perf_metrics['travel_dist'] = self.env.travel_dist
         self.perf_metrics['explored_rate'] = self.env.explored_rate
         self.perf_metrics['success_rate'] = 1 if done and not collision else 0
@@ -141,5 +148,5 @@ if __name__ == "__main__":
     # model = (NODE_INPUT_DIM, EMBEDDING_DIM)
     # checkpoint = torch.load(model_path + '/checkpoint.pth', map_location='cpu')
     # model.load_state_dict(checkpoint['policy_model'])
-    worker = DualStageWorker(0, 22, save_image=True)
+    worker = DualStageWorker(0, 22, save_image=True, random_wapoint=True, train_local_controller=True)
     worker.run_episode()

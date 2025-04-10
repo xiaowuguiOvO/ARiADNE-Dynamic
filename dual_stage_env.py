@@ -3,19 +3,20 @@ import matplotlib.pyplot as plt
 from skimage import io
 from skimage.measure import block_reduce
 from copy import deepcopy
-
+from io import BytesIO
+from PIL import Image
 from sensor import sensor_work
 from utils import *
-
+import random
 
 class Env:
-    def __init__(self, episode_index, plot=False):
+    def __init__(self, episode_index, plot=False, random_wapoint=False):
         self.episode_index = episode_index
         self.plot = plot
         self.ground_truth, self.robot_cell = self.import_ground_truth(episode_index)
         self.ground_truth_size = np.shape(self.ground_truth)  # cell
         self.cell_size = CELL_SIZE  # meter
-
+        self.random_wapoint = random_wapoint # 是否随机生成目标点
         self.agent = None
         self.robot_location = np.array([0.0, 0.0])  # meter
         self.robot_belief = np.ones(self.ground_truth_size) * 127
@@ -262,6 +263,43 @@ class Env:
         # - 127: 未探索区域
         # - 255: 已探索的自由空间
         return value != 0  # 如果是障碍物，则发生碰撞
+        
+    def generate_random_waypoint(self):
+        """
+        在机器人附近的NodeManager中随机选择一个节点作为目标点
+        
+        Returns:
+            bool: 是否成功生成目标点
+            np.array: 生成的目标点坐标，如果失败则为None
+        """
+        if self.agent is None or self.agent.node_manager is None:
+            print("警告：agent或NodeManager未初始化")
+            return False, None
+            
+        # 获取当前位置
+        current_location = self.robot_location
+        
+        # 获取NodeManager中的所有节点
+        candidate_nodes = []
+        for node in self.agent.node_manager.nodes_dict.__iter__():
+            node_pos = np.array([node.x, node.y])
+            distance = np.linalg.norm(node_pos - current_location)
+            
+            # 检查节点是否在指定距离范围内
+            if 0.5 <= distance <= RANDOM_DIST:
+                candidate_nodes.append(node)
+        
+        # 如果没有符合条件的节点，返回失败
+        if not candidate_nodes:
+            print(f"在距离{RANDOM_DIST}米范围内没有找到合适的节点")
+            return False, None
+    
+        # 随机选择一个候选节点
+        selected_node = random.choice(candidate_nodes)
+        selected_waypoint = np.array([selected_node.x, selected_node.y])
+        
+        # print(f"从NodeManager中选择随机目标点: {selected_waypoint}, 距离: {np.linalg.norm(selected_waypoint - current_location):.2f}m")
+        return True, selected_waypoint
     
     def step(self):
         """
@@ -382,10 +420,11 @@ class Env:
             self.time_since_last_decision = 0.0
             
         return reward, collision
-
+            
     def plot_env(self, step):
         plt.subplot(1, 3, 1)
-        plt.imshow(self.robot_belief, cmap='gray', origin='lower')
+        # 使用ground_truth代替robot_belief
+        plt.imshow(self.ground_truth, cmap='gray', origin='lower')
         plt.axis('off')
         
         # 绘制机器人和轨迹
@@ -396,23 +435,37 @@ class Env:
                 (np.array(self.trajectory_y) - self.belief_origin_y) / self.cell_size, 
                 'b', linewidth=2, zorder=1)
         
-        # # 绘制动态障碍物 - 使用更明显的颜色和更大的尺寸
+        # # 绘制动态障碍物 - 现在我们可以显示这些，因为我们展示的是完整地图
         # for obs in self.dynamic_obstacles:
         #     # 转换障碍物位置到栅格坐标
         #     x = (obs['position'][0] - self.belief_origin_x) / self.cell_size
         #     y = (obs['position'][1] - self.belief_origin_y) / self.cell_size
             
-        #     # 画出障碍物的圆形范围 - 使用更明显的颜色和更大的半径
-        #     circle = plt.Circle((x, y), OBSTACLE_RADIUS * 1.5 / self.cell_size,  # 增加半径
-        #                         color='red', alpha=0.7, zorder=4)  # 使用红色
+        #     # 画出障碍物的圆形范围
+        #     circle = plt.Circle((x, y), OBSTACLE_RADIUS * 1.5 / self.cell_size,
+        #                         color='red', alpha=0.7, zorder=4)
         #     plt.gca().add_patch(circle)
             
-        #     # 画出障碍物的运动路径 - 使用红色虚线
+        #     # 画出障碍物的运动路径
         #     path_x = [(obs['waypoint1'][0] - self.belief_origin_x) / self.cell_size,
         #             (obs['waypoint2'][0] - self.belief_origin_x) / self.cell_size]
         #     path_y = [(obs['waypoint1'][1] - self.belief_origin_y) / self.cell_size,
         #             (obs['waypoint2'][1] - self.belief_origin_y) / self.cell_size]
-        #     plt.plot(path_x, path_y, 'r--', alpha=0.5, zorder=2)  # 红色虚线表示运动路径
+        #     plt.plot(path_x, path_y, 'r--', alpha=0.5, zorder=2)
+        
+        # 在完整地图上，我们还可以绘制当前的目标点（waypoint）
+        if hasattr(self.agent, 'waypoint') and self.agent.waypoint is not None:
+            waypoint_x = (self.agent.waypoint[0] - self.belief_origin_x) / self.cell_size
+            waypoint_y = (self.agent.waypoint[1] - self.belief_origin_y) / self.cell_size
+            plt.scatter(waypoint_x, waypoint_y, c='blue', s=50, marker='*', zorder=5)
+        
+        # # 我们也可以显示机器人的朝向
+        # if hasattr(self.agent, 'heading_theta'):
+        #     robot_x = (self.robot_location[0] - self.belief_origin_x) / self.cell_size
+        #     robot_y = (self.robot_location[1] - self.belief_origin_y) / self.cell_size
+        #     plt.quiver(robot_x, robot_y, 
+        #               np.cos(self.agent.heading_theta), np.sin(self.agent.heading_theta),
+        #               color='magenta', scale=20, zorder=6)
             
         plt.suptitle('Explored: {:.4g}  Distance: {:.4g}  Collisions: {}  Linear: {:.2f} Angular: {:.2f} Total Reward: {:.2f} Heading: {:.2f}'.format(
             self.explored_rate, 
