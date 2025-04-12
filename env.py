@@ -430,7 +430,7 @@ class Env:
             self.total_reward
         ))
         plt.tight_layout()
-        plt.savefig('{}/{}_{}_samples.png'.format(gifs_path, self.episode_index, step), dpi=150)
+        # plt.savefig('{}/{}_{}_samples.png'.format(gifs_path, self.episode_index, step), dpi=150)
         frame = '{}/{}_{}_samples.png'.format(gifs_path, self.episode_index, step)
         plt.close()
         self.frame_files.append(frame)

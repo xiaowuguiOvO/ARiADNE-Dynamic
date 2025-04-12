@@ -415,6 +415,8 @@ class DualStageAgent:
             self.current_path_index = 0
         else:
             self.current_target = np.array(self.waypoint)
+        
+        print(f"路径规划完成，共 {len(self.path_points)} 个路径点")
         return self.path_points
         
     def plot_env(self, waypoint_index=None):
@@ -445,12 +447,12 @@ class DualStageAgent:
             # 绘制路径点
             plt.scatter(path_points_cells[:, 0], path_points_cells[:, 1], c='g', s=30, zorder=4)
             # 标记当前目标点
-            # current_target = None
-            # if self.current_path_index < len(path_points):
-            #     current_target = self.path_points[self.current_path_index]
-            # if current_target is not None:
-            #     current_target_cell = (current_target - np.array([self.map_info.map_origin_x, self.map_info.map_origin_y])) / self.cell_size
-            #     plt.scatter(current_target_cell[0], current_target_cell[1], c='c', s=80, marker='*', zorder=6)
+            current_target = None
+            if self.current_path_index < len(path_points):
+                current_target = self.path_points[self.current_path_index]
+            if current_target is not None:
+                current_target_cell = (current_target - np.array([self.map_info.map_origin_x, self.map_info.map_origin_y])) / self.cell_size
+                plt.scatter(current_target_cell[0], current_target_cell[1], c='c', s=80, marker='*', zorder=6)
 
         # # 添加动态障碍物到中间子图
         # if hasattr(self, 'env') and hasattr(self.env, 'dynamic_obstacles'):
@@ -494,20 +496,20 @@ class DualStageAgent:
         plt.quiver(robot[0], robot[1], np.cos(self.heading_theta), np.sin(self.heading_theta), 
             color='m', scale=32, zorder=5)
         # 绘制分解后的路径
-        # if self.use_path_following and len(self.path_points) > 0:
-        #     path_points = np.array(self.path_points)
-        #     path_points_cells = (path_points - np.array([self.map_info.map_origin_x, self.map_info.map_origin_y])) / self.cell_size
-        #     # 绘制路径线
-        #     plt.plot(path_points_cells[:, 0], path_points_cells[:, 1], 'g-', linewidth=2, zorder=3)
-        #     # 绘制路径点
-        #     plt.scatter(path_points_cells[:, 0], path_points_cells[:, 1], c='g', s=30, zorder=4)
+        if self.use_path_following and len(self.path_points) > 0:
+            path_points = np.array(self.path_points)
+            path_points_cells = (path_points - np.array([self.map_info.map_origin_x, self.map_info.map_origin_y])) / self.cell_size
+            # 绘制路径线
+            plt.plot(path_points_cells[:, 0], path_points_cells[:, 1], 'g-', linewidth=2, zorder=3)
+            # 绘制路径点
+            plt.scatter(path_points_cells[:, 0], path_points_cells[:, 1], c='g', s=30, zorder=4)
             # 标记当前目标点
-            # current_target = None
-            # if self.current_path_index < len(path_points):
-            #     current_target = self.path_points[self.current_path_index]
-            # if current_target is not None:
-            #     current_target_cell = (current_target - np.array([self.map_info.map_origin_x, self.map_info.map_origin_y])) / self.cell_size
-            #     plt.scatter(current_target_cell[0], current_target_cell[1], c='c', s=80, marker='*', zorder=6)
+            current_target = None
+            if self.current_path_index < len(path_points):
+                current_target = self.path_points[self.current_path_index]
+            if current_target is not None:
+                current_target_cell = (current_target - np.array([self.map_info.map_origin_x, self.map_info.map_origin_y])) / self.cell_size
+                plt.scatter(current_target_cell[0], current_target_cell[1], c='c', s=80, marker='*', zorder=6)
 
         # # 添加动态障碍物到右侧子图
         # if hasattr(self, 'env') and hasattr(self.env, 'dynamic_obstacles'):

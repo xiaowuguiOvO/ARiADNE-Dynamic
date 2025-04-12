@@ -257,13 +257,15 @@ class WaypointSelector(nn.Module):
                                           enhanced_viewpoint_feature, current_edge, edge_padding_mask)
         return waypoint_logp
     
+HIDEN_1 = 800
+HIDEN_2 = 600
 
 class LocalController(nn.Module):
     def __init__(self, state_dim=4, action_dim=2):
         super(LocalController, self).__init__()
-        self.layer1 = nn.Linear(state_dim, 800)
-        self.layer2 = nn.Linear(800, 600)
-        self.layer3 = nn.Linear(600, action_dim)
+        self.layer1 = nn.Linear(state_dim, HIDEN_1)
+        self.layer2 = nn.Linear(HIDEN_1, HIDEN_2)
+        self.layer3 = nn.Linear(HIDEN_2, action_dim)
         self.tanh = nn.Tanh()
     
     def forward(self, state):
@@ -332,15 +334,15 @@ class ControllerQNetwork(nn.Module):
     def __init__(self, state_dim, action_dim):
         super(ControllerQNetwork, self).__init__()
 
-        self.layer_1 = nn.Linear(state_dim, 800)
-        self.layer_2_s = nn.Linear(800, 600)
-        self.layer_2_a = nn.Linear(action_dim, 600)
-        self.layer_3 = nn.Linear(600, 1)
+        self.layer_1 = nn.Linear(state_dim, HIDEN_1)
+        self.layer_2_s = nn.Linear(HIDEN_1, HIDEN_2)
+        self.layer_2_a = nn.Linear(action_dim, HIDEN_2)
+        self.layer_3 = nn.Linear(HIDEN_2, 1)
 
-        self.layer_4 = nn.Linear(state_dim, 800)
-        self.layer_5_s = nn.Linear(800, 600)
-        self.layer_5_a = nn.Linear(action_dim, 600)
-        self.layer_6 = nn.Linear(600, 1)
+        self.layer_4 = nn.Linear(state_dim, HIDEN_1)
+        self.layer_5_s = nn.Linear(HIDEN_1, HIDEN_2)
+        self.layer_5_a = nn.Linear(action_dim, HIDEN_2)
+        self.layer_6 = nn.Linear(HIDEN_2, 1)
 
     def forward(self, s, a):
         s1 = F.relu(self.layer_1(s))
@@ -360,65 +362,15 @@ class ControllerQNetwork(nn.Module):
         q2 = self.layer_6(s2)
         return q1, q2
     
+class ValueNetwork(nn.Module):
+    def __init__(self, state_dim):
+        super(ValueNetwork, self).__init__()
+        self.fc1 = nn.Linear(state_dim, 256)
+        self.fc2 = nn.Linear(256, 256)
+        self.value_head = nn.Linear(256, 1)
 
-# class DualStageAgent(nn.Module):
-#     """整合高层规划和底层控制的完整双阶段代理"""
-    
-#     def __init__(self, node_dim, robot_state_dim, embedding_dim=128):
-#         super(DualStageAgent, self).__init__()
-        
-#         # 高层路点选择器
-#         self.waypoint_selector = WaypointSelector(node_dim, embedding_dim)
-        
-#         # 底层运动控制器
-#         self.local_controller = LocalController(state_dim=robot_state_dim+4)  # +4是距离和角度差
-        
-#         # 训练模式标志
-#         self.training_high_level = True  # 控制训练哪一层
-        
-#     def forward(self, observation):
-#         """
-#         执行完整的双阶段决策过程
-        
-#         参数:
-#             observation: 包含图表示和机器人状态的观测字典
-            
-#         返回:
-#             waypoint: 选择的下一个路点
-#             velocity: 生成的速度命令
-#         """
-#         # 1. 高层规划 - 选择路点
-#         waypoint_logits = self.waypoint_selector(
-#             observation['node_inputs'],
-#             observation['node_padding_mask'],
-#             observation['edge_mask'],
-#             observation['current_index'],
-#             observation['current_edge'],
-#             observation['edge_padding_mask']
-#         )
-        
-#         # 根据logits选择路点 (训练时采样，推理时取最大值)
-#         if self.training:
-#             waypoint_dist = torch.distributions.Categorical(logits=waypoint_logits)
-#             waypoint_idx = waypoint_dist.sample()
-#         else:
-#             waypoint_idx = torch.argmax(waypoint_logits, dim=1)
-            
-#         # 提取选择的路点坐标 (假设前两维是xy坐标)
-#         selected_waypoint = torch.gather(
-#             observation['node_inputs'], 1,
-#             waypoint_idx.unsqueeze(1).unsqueeze(2).repeat(1, 1, 2)
-#         ).squeeze(1)[:, :2]
-        
-#         # 2. 底层控制 - 生成速度命令
-#         robot_state = observation['robot_state']
-#         velocity, mean, log_std = self.local_controller(robot_state, selected_waypoint)
-        
-#         return {
-#             'waypoint_idx': waypoint_idx,
-#             'waypoint': selected_waypoint,
-#             'velocity': velocity,
-#             'waypoint_logits': waypoint_logits,
-#             'velocity_mean': mean,
-#             'velocity_log_std': log_std
-#         }
+    def forward(self, state):
+        x = F.relu(self.fc1(state))
+        x = F.relu(self.fc2(x))
+        value = self.value_head(x)
+        return value

@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import math
 from parameter import *
-
+import torch.nn.functional as F
 # a pointer network layer for policy output
 class SingleHeadAttention(nn.Module):
     def __init__(self, embedding_dim):
@@ -349,3 +349,4 @@ class QNet(nn.Module):
         q_values = self.q_values_layer(combined_feature)
         
         return q_values
+

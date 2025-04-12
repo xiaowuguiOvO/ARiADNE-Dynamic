@@ -249,7 +249,7 @@ environment_dim = 20
 robot_dim = 4
 render_mode = 'human' if render else None
 env = LocalPlannerEnv(
-    map_size=10.0,
+    map_size=3.0,
     target_radius=0.3,
     max_steps=MAX_TIME_STEPS,
     render_mode=render_mode,
@@ -393,6 +393,7 @@ while timestep < MAX_TIME_STEPS:
         
     if expl_noise > expl_min:
         expl_noise = expl_noise - ((expl_noise - expl_min) / expl_decay_steps)
+        print(f"expl_noise: {expl_noise}")
         
     action = (action + np.random.normal(0, expl_noise, size=action_dim)).clip(-max_action, max_action)
     
