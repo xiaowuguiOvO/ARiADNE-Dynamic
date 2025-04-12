@@ -390,6 +390,7 @@ while timestep < MAX_TIME_STEPS:
     with torch.no_grad():
         action = agent.local_controller(current_state)
         action = action.cpu().numpy().squeeze()
+        
     if expl_noise > expl_min:
         expl_noise = expl_noise - ((expl_noise - expl_min) / expl_decay_steps)
         

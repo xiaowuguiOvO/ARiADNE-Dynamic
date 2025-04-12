@@ -180,6 +180,7 @@ class Env:
             # 打印位置变化，用于调试
             # print(f"障碍物{i} 从 {old_pos} 移动到 {obs['position']}, 移动了 {np.linalg.norm(obs['position']-old_pos):.4f}m")
 
+    
     def import_ground_truth(self, episode_index):
         map_dir = f'maps'
         map_list = os.listdir(map_dir)
@@ -247,22 +248,13 @@ class Env:
         return False
     
     def check_wall_collision(self, position):
-        """检查给定位置是否与墙壁碰撞，使用机器人的信念地图"""
+        """检查给定位置是否与墙壁碰撞，使用ground_truth"""
         # 确保位置是整数坐标
         x, y = np.round((position - np.array([self.belief_origin_x, self.belief_origin_y])) / self.cell_size).astype(int)
-        
         # 检查是否超出地图边界
-        if x < 0 or x >= self.robot_belief.shape[1] or y < 0 or y >= self.robot_belief.shape[0]:
+        if x < 0 or x >= self.ground_truth.shape[1] or y < 0 or y >= self.ground_truth.shape[0]:
             return True
-        
-        # 检查位置的值
-        value = self.robot_belief[y, x]
-        # print(value)
-        # robot_belief中：
-        # - 0: 障碍物
-        # - 127: 未探索区域
-        # - 255: 已探索的自由空间
-        return value != 0  # 如果是障碍物，则发生碰撞
+        return self.ground_truth[y, x] != GROUND_TRUTH_FREE
         
     def generate_random_waypoint(self):
         """
@@ -309,6 +301,7 @@ class Env:
             collision: 是否发生碰撞
             need_decision: 是否需要做新决策
         """
+        done = False
         if self.agent is None:
             raise ValueError("必须先使用set_agent设置代理")
         
@@ -334,16 +327,9 @@ class Env:
         current_pos = self.robot_location.copy()
         next_pos = current_pos + cartesian_velocity * self.step_size
         
-        next_cell_x = np.round((next_pos[0] - self.belief_origin_x) / self.cell_size).astype(int)
-        next_cell_y = np.round((next_pos[1] - self.belief_origin_y) / self.cell_size).astype(int)
-        
-        wall_collision = False
-        if (next_cell_x < 0 or next_cell_x >= self.robot_belief.shape[1] or
-                next_cell_y < 0 or next_cell_y >= self.robot_belief.shape[0] or
-                self.robot_belief[next_cell_y, next_cell_x] != 255):  # 使用robot_belief检查障碍物
-                # 如果会碰到墙
-                # wall_collision = True
-                pass
+        wall_collision = self.check_wall_collision(next_pos)
+        dynamic_collision = False
+        # print(f"wall_collision: {wall_collision}")
         
         # 保存原始控制命令用于记录
         self.velocity_command = velocity_command  # [linear, angular]
@@ -362,12 +348,11 @@ class Env:
         old_location = self.robot_location.copy()
         
         # 更新位置
-        if not wall_collision:
-            self.robot_location = next_pos
-        else:
-            self.robot_location = old_location - cartesian_velocity * self.step_size * 0.5
+        # if not wall_collision:
+        #     self.robot_location = next_pos
+        # else:
+        #     self.robot_location = old_location - cartesian_velocity * self.step_size * 0.5
             # print("collision, old belief: ", self.robot_belief[self.robot_cell[1], self.robot_cell[0]])
-        
         # 更新栅格位置
         self.robot_cell = np.round(
             np.array([(self.robot_location[0] - self.belief_origin_x) / self.cell_size,
@@ -377,49 +362,23 @@ class Env:
         # 更新移动距离
         moved_dist = np.linalg.norm(self.robot_location - old_location)
         total_dist += moved_dist
-        self.distance_since_last_decision += moved_dist
-        
-        # 更新决策时间计数器
-        self.time_since_last_decision += self.step_size
-        
         # 更新动态障碍物位置
         self.update_dynamic_obstacles(self.step_size)
         
-        # 检查碰撞
-        if self.check_collision():
-            collision = True
-            self.collision_count += 1
-            
-        # 检查是否需要新决策 - 如果机器人与Waypoint距离小于预制
-        # if self.agent.check_arrive_waypoint(self.agent.waypoint):
-        #     need_decision = True
-        
-        # need_decision = True
-        # if (self.distance_since_last_decision >= self.decision_distance or
-        #     self.time_since_last_decision >= self.decision_interval):
-        #     # need_decision = True
-        #     pass
-            
-            
-        # 更新机器人的信念地图（在一定间隔或碰撞时）
-        # if need_decision or collision:
         self.update_robot_belief()
-        
+        self.agent.belief_info = self.belief_info
+        self.agent.update_local_belief_map()
         # 累计总移动距离
         self.travel_dist += total_dist
-        
         # 评估探索率
         self.evaluate_exploration_rate()
-        
         # 计算奖励
-        reward = self.calculate_reward(total_dist, collision, wall_collision)
+        reward = self.calculate_reward(total_dist, dynamic_collision, wall_collision)
         self.total_reward += reward
-        # 重置决策计数器
-        if need_decision or collision:
-            self.distance_since_last_decision = 0.0
-            self.time_since_last_decision = 0.0
-            
-        return reward, collision
+
+        if wall_collision:
+            done = True
+        return reward, dynamic_collision, wall_collision, done
             
     def plot_env(self, step):
         plt.subplot(1, 3, 1)

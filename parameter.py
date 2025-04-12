@@ -7,7 +7,7 @@ gifs_path = f'gifs/{FOLDER_NAME}'
 # save training data
 SUMMARY_WINDOW = 32  # how many training steps before writing data to tensorboard
 LOAD_MODEL = False  # do you want to load the model trained before
-SAVE_IMG_GAP = 200  # how many episodes before saving a gif
+SAVE_IMG_GAP = 40  # how many episodes before saving a gif
 
 # map and planning resolution
 CELL_SIZE = 0.1  # meter, your map resolution
@@ -59,13 +59,13 @@ ROBOT_RADIUS = 0.3             # 机器人半径 (m)
 COLLISION_PENALTY = 0       # 碰撞惩罚
 SAFE_DISTANCE = 1.5            # 安全距离 (m)
 PROXIMITY_PENALTY = 1        # 接近惩罚系数
-WALL_COLLISION_PENALTY = 0.05  # 墙壁碰撞惩罚
+WALL_COLLISION_PENALTY = 100  # 墙壁碰撞惩罚
 
 OBSTACLE_CURVE_MIN_DIST = 5  # 最小障碍物轨迹距离
 OBSTACLE_CURVE_MAX_DIST = 20  # 最大障碍物轨迹距离
 
 # 时间和频率控制
-MAX_EPISODE_STEP = 64
+MAX_EPISODE_STEP = 128
 MAX_EPISODE_TIME = 300.0         # 最大模拟时间(秒)
 STEP_SIZE = 0.2               # 仿真时间步长(秒)
 DECISION_INTERVAL = 0.1         # 决策间隔时间(秒)
@@ -74,9 +74,9 @@ VISUALIZATION_INTERVAL = 20     # 可视化帧间隔(步数)
 
 # MAX_VELOCITY = 12.0
 # MIN_VELOCITY = -12.0
-MAX_LINEAR_VELOCITY = 6 * SPEED_SCALE
-MIN_LINEAR_VELOCITY = 0.5
-MAX_ANGULAR_VELOCITY = 1.0 * SPEED_SCALE
+MAX_LINEAR_VELOCITY = 1
+MIN_LINEAR_VELOCITY = 0
+MAX_ANGULAR_VELOCITY = 1.0
 WAYPOINT_THRESHOLD = 0.5
 # 目标网络更新参数
 TARGET_UPDATE_INTERVAL = 10  # 每隔多少步更新一次目标网络
@@ -88,7 +88,7 @@ ENTROPY_TARGET = -2.0
 LOCAL_CONTROLLER_PATH = 'saved_models/best_model/actor_good.pth'
 
 # randon相关
-RANDOM_DIST = 10.0 # 随机目标点距离
+RANDOM_DIST = 1 # 随机目标点距离
 
 # map相关
 GROUND_TRUTH_FREE = 255
@@ -97,3 +97,15 @@ GROUND_TRUTH_OCCUPIED = 1
 ROBOT_BELIEF_FREE = 255
 ROBOT_BELIEF_OCCUPIED = 0
 ROBOT_BELIEF_UNKNOWN = 127
+
+ROBOT_LOCAL_MAP_SIZE = 80
+
+# Controller parameters
+ACTOR_LR = 1e-4
+CRITIC_LR = 1e-3
+POLICY_NOISE = 0.2
+NOISE_CLIP = 0.5
+POLICY_DELAY = 2
+TAU = 0.005
+
+REACH_WAYPOINT_REWARD = 100.0

@@ -52,9 +52,32 @@ class DualStageAgent:
         self.distance_to_target = 0.0
         self.heading_theta = 0.0
         self.heading_theta_diff = 0.0
-    
+        self.belief_info = None
+        self.local_belief_map = None
     def update_waypoint(self, waypoint):
         self.waypoint = waypoint
+    
+    def update_local_belief_map(self):
+        # 将机器人位置从实际坐标(米)转换为地图栅格坐标
+        robot_cell = get_cell_position_from_coords(self.location, self.belief_info)
+        # print(f"机器人栅格坐标: {robot_cell}")
+        # 计算局部地图的栅格范围
+        half_size = int(ROBOT_LOCAL_MAP_SIZE / 2)
+        min_y = max(0, robot_cell[1] - half_size)
+        max_y = min(self.belief_info.map.shape[0], robot_cell[1] + half_size)
+        min_x = max(0, robot_cell[0] - half_size)
+        max_x = min(self.belief_info.map.shape[1], robot_cell[0] + half_size)
+        # print(f"局部地图栅格范围: y={min_y}:{max_y}, x={min_x}:{max_x}")
+        # 检查切片范围是否有效
+        if min_x >= max_x or min_y >= max_y:
+            # 使用安全范围
+            min_y = 0
+            max_y = min(ROBOT_LOCAL_MAP_SIZE, self.belief_info.map.shape[0])
+            min_x = 0
+            max_x = min(ROBOT_LOCAL_MAP_SIZE, self.belief_info.map.shape[1])
+        
+        # 使用栅格坐标切片获取局部地图
+        self.local_belief_map = self.belief_info.map[min_y:max_y, min_x:max_x]
     
     def _load_local_controller(self):
         # 先创建模型实例
