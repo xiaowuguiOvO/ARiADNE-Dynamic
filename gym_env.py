@@ -8,7 +8,7 @@ from skimage.measure import block_reduce
 import matplotlib.pyplot as plt
 import time
 import traceback # 用于打印详细错误
-
+from dual_stage_agent import DualStageAgent
 # --- Gym 环境定义 ---
 class NavigationEnv(gym.Env):
     """
@@ -32,7 +32,7 @@ class NavigationEnv(gym.Env):
                  max_episode_steps=500,             # 每回合最大步数
                  render_mode=None):                 # 渲染模式 ('human', 'rgb_array', or None)
         super().__init__() # 初始化父类
-
+        self.agent = None
         self.map_dir = map_dir
         self.resolution = resolution              # 地图分辨率，单位：米/像素
         self.max_linear_speed = max_linear_speed  # 最大线速度，单位：米/秒
@@ -152,7 +152,7 @@ class NavigationEnv(gym.Env):
 
         # 将起始单元格索引转换为连续位置 (单元格中心)
         robot_start_pos = robot_start_cell_indices.astype(np.float32) + 0.5
-        print(f"机器人起始位置 [行, 列]: {robot_start_pos}")
+        print(f"Robot start position [row, col]: {robot_start_pos}")
 
         return ground_truth_processed, robot_start_pos # 返回处理后的地图和起始位置 [行, 列]
 
@@ -433,7 +433,7 @@ if __name__ == '__main__':
         env = NavigationEnv(map_dir=map_dir_name,
                             render_mode='human',
                             max_episode_steps=300,) # 减少最大步数以便快速测试)         # 设置渲染帧率
-
+        env.agent = DualStageAgent()
         num_episodes = 3 # 测试回合数
         for episode in range(num_episodes):
             print(f"\n--- start episode {episode + 1} ---")

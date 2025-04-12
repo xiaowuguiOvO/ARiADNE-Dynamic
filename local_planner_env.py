@@ -2,8 +2,8 @@ import numpy as np
 import torch
 import matplotlib.pyplot as plt
 from matplotlib.patches import Circle
-import gymnasium as gym
-from gymnasium import spaces
+import gym
+from gym import spaces
 from parameter import *
 
 class LocalPlannerEnv(gym.Env):
@@ -88,7 +88,7 @@ class LocalPlannerEnv(gym.Env):
             
             # 计算与机器人的距离
             dist = np.linalg.norm(target_pos - np.array([x, y]))
-            if dist > 3.0:  # 确保初始目标点与机器人有一定距离
+            if dist > 0.5:  # 确保初始目标点与机器人有一定距离
                 break
         
         self.target_position = target_pos
@@ -108,21 +108,16 @@ class LocalPlannerEnv(gym.Env):
         self.robot_heading = theta
         
         # 更新机器人状态，使用角度差代替绝对朝向
-        self.robot_state = np.array([x, y, heading_diff, v_linear, v_angular, distance_to_target], dtype=np.float32)
+        self.robot_state = np.array([distance_to_target, heading_diff, v_linear, v_angular, x, y], dtype=np.float32)
         
         self.steps = 0
-        
-        observation = {
-            'robot_state': self.robot_state,
-            'target_position': self.target_position
-        }
-        
+         
         info = {}
         
         if self.render_mode == 'human':
             self._render_frame()
             
-        return observation, info
+        return self.robot_state, info
     
     def step(self, action):
         """执行动作并更新环境"""
@@ -131,15 +126,14 @@ class LocalPlannerEnv(gym.Env):
         v_linear = np.clip(action[0], 0, self.max_linear_velocity)
         v_angular = np.clip(action[1], -self.max_angular_velocity, self.max_angular_velocity)
         action = np.array([v_linear, v_angular])
-        
-        # 更新机器人状态
-        x, y, heading_diff, _, _, _ = self.robot_state
+        # 取x, y
+        _, _, _, _, x, y = self.robot_state
         
         # 更新机器人真实朝向（内部使用）
         self.robot_heading = self.robot_heading + v_angular * self.dt
+        # print("self.robot_heading, v_angular, dt",self.robot_heading, v_angular, self.dt)
         # 将角度标准化到[-pi, pi]
         self.robot_heading = np.arctan2(np.sin(self.robot_heading), np.cos(self.robot_heading))
-        
         # 使用真实朝向更新位置
         x_new = x + v_linear * np.cos(self.robot_heading) * self.dt
         y_new = y + v_linear * np.sin(self.robot_heading) * self.dt
@@ -161,30 +155,33 @@ class LocalPlannerEnv(gym.Env):
                                       np.cos(target_direction - self.robot_heading))
         
         # 更新状态，使用新的角度差
-        self.robot_state = np.array([x_new, y_new, heading_diff_new, v_linear, v_angular, dist_to_target], dtype=np.float32)
-        
+        self.robot_state = np.array([dist_to_target, heading_diff_new, v_linear, v_angular, x_new, y_new], dtype=np.float32)
         # 检查是否到达目标
         reached_target = self.distance_to_target <= self.target_radius
         
         # 计算奖励，基于接近程度和角度差减小程度
         approach_reward = self.previous_distance_to_target - self.distance_to_target
-        angle_thresh = 0
+        angle_thresh = np.pi/6
         heading_reward = angle_thresh - abs(heading_diff_new)
 
         speed_reward = action[0] * 1.0
         # 计算总奖励
+        approach_reward = approach_reward * 10
+        heading_reward = heading_reward * 0.1
         reward = approach_reward + heading_reward + speed_reward
+        # print(approach_reward, heading_reward)
         
         if reached_target:
             reward += 100.0  # 到达目标的奖励
             done = True
+            terminated = True
             
         # 保存当前奖励和角度信息用于显示
         self.current_reward = f"{reward:.2f}"
         self.total_reward += reward
         # 更新步数并检查是否结束
         self.steps += 1
-        terminated = False
+        terminated = done
         truncated = self.steps >= self.max_steps
         
         # 准备观测和信息
@@ -202,7 +199,7 @@ class LocalPlannerEnv(gym.Env):
         if self.render_mode == 'human':
             self._render_frame()
             
-        return observation, reward, terminated, truncated, info, done
+        return self.robot_state, reward, terminated, truncated, info, done
     
     def render(self):
         """渲染环境"""
@@ -239,7 +236,7 @@ class LocalPlannerEnv(gym.Env):
                      'k-', linewidth=2)
         
         # 获取机器人信息
-        x, y, heading_diff, v_linear, v_angular, distance_to_target = self.robot_state
+        distance_to_target, heading_diff, v_linear, v_angular, x, y = self.robot_state
         
         # 机器人圆形表示
         robot_circle = Circle((x, y), 0.3, color='blue', alpha=0.7)
