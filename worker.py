@@ -15,7 +15,6 @@ class Worker:
         self.global_step = global_step
         self.save_image = save_image
         self.device = device
-
         self.env = Env(global_step, plot=self.save_image)
         self.robot = Agent(policy_net, self.device, self.save_image)
         self.robot.env = self.env
@@ -183,5 +182,5 @@ if __name__ == "__main__":
     model = PolicyNet(NODE_INPUT_DIM, EMBEDDING_DIM)
     # checkpoint = torch.load(model_path + '/checkpoint.pth', map_location='cpu')
     # model.load_state_dict(checkpoint['policy_model'])
-    worker = Worker(0, model, 78, save_image=True)
+    worker = Worker(0, model, 78, save_image=True, random_wapoint=True)
     worker.run_episode()
