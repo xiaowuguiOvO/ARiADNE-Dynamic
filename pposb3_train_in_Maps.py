@@ -5,7 +5,7 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback
 import os
 import stable_baselines3
-from local_controller_env import Env
+from sb3_env import Env
 from dual_stage_agent import DualStageAgent
 from stable_baselines3.common.vec_env import DummyVecEnv
 

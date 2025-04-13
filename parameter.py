@@ -10,7 +10,7 @@ LOAD_MODEL = False  # do you want to load the model trained before
 SAVE_IMG_GAP = 200  # how many episodes before saving a gif
 
 # map and planning resolution
-CELL_SIZE = 0.1  # meter, your map resolution
+CELL_SIZE = 0.4  # meter, your map resolution
 NODE_RESOLUTION = 1  # meter, your node resolution
 FRONTIER_CELL_SIZE = 2 * CELL_SIZE  # do you want to downsample the frontiers
 
@@ -24,8 +24,8 @@ SENSOR_RANGE = 16  # meter
 UTILITY_RANGE = 0.8 * SENSOR_RANGE  # consider frontiers within this range as observable
 MIN_UTILITY = 2  # ignore the utility if observable frontiers are less than this value
 
-# updating map range w.r.t the robot
-UPDATING_MAP_SIZE = 4 * SENSOR_RANGE + 4 * NODE_RESOLUTION  # nodes outside this range will not be affected by current measurements
+# updating map range w.r.t the robot , 这里指的是边长
+UPDATING_MAP_SIZE = SENSOR_RANGE * 2 + NODE_RESOLUTION * 2  # nodes outsi de this range will not be affected by current measurements
 
 # training parameters
 REPLAY_SIZE = 10000

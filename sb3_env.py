@@ -462,6 +462,8 @@ class Env:
             self.heading_arrow = self.ax.quiver([], [], [], [], color='red', scale=20, zorder=6)
             self.frontier_points = self.ax.scatter([], [], c='red', s=4, marker='.', zorder=4)
             self.info_text = self.ax.text(0.02, 1.05, '', transform=self.ax.transAxes)
+            self.updating_map_rect = plt.Rectangle((0, 0), 1, 1, fill=False, color='green', linewidth=2, zorder=7)
+            self.ax.add_patch(self.updating_map_rect)
         else:
             # 更新belief map
             self.im.set_data(self.robot_belief)
@@ -499,12 +501,36 @@ class Env:
             self.frontier_points.set_color('red')
         else:
             self.frontier_points.set_offsets(np.array([[]], dtype=float).reshape(0, 2))
-        
-        # 更新信息文本
-        info_str = f'v_lin: {self.agent.v_linear:.2f}  v_ang: {self.agent.v_angular:.2f}  reward: {self.total_reward:.2f} step: {self.step_count} dis: {self.agent.distance_to_target:.2f}'
-        self.info_text.set_text(info_str)
-        
-        self.ax.axis('off')
+            
+        if hasattr(self.agent, 'updating_map_size'):
+            # 获取地图尺寸
+            map_height, map_width = self.robot_belief.shape
+            # 计算updating_map的大小（栅格单位）
+            size_in_cells = int(self.agent.updating_map_size / self.cell_size)
+            print(self.agent.updating_map_size, self.cell_size, size_in_cells)
+            # 计算矩形框的位置，确保完全在地图范围内
+            half_size = size_in_cells // 2
+            rect_x = np.clip(robot_x - half_size, 0, map_width - size_in_cells)
+            rect_y = np.clip(robot_y - half_size, 0, map_height - size_in_cells)
+            # 打印调试信息
+            print(f"Map size: {map_width}x{map_height}, Robot pos: ({robot_x:.2f}, {robot_y:.2f})")
+            print(f"Rect pos: ({rect_x:.2f}, {rect_y:.2f}), size: {size_in_cells}")
+            # 更新矩形框
+            self.updating_map_rect.set_xy((rect_x, rect_y))
+            self.updating_map_rect.set_width(size_in_cells)
+            self.updating_map_rect.set_height(size_in_cells)
+            self.updating_map_rect.set_visible(True)
+            # 设置矩形框的样式
+            self.updating_map_rect.set_facecolor('none')  # 透明填充
+            self.updating_map_rect.set_edgecolor('green')  # 绿色边框
+            self.updating_map_rect.set_linewidth(1)  # 设置线宽
+            # 强制重绘
+            self.fig.canvas.draw_idle()
+            
+            # 更新信息文本
+            info_str = f'v_lin: {self.agent.v_linear:.2f}  v_ang: {self.agent.v_angular:.2f}  reward: {self.total_reward:.2f} step: {self.step_count} dis: {self.agent.distance_to_target:.2f}'
+            self.info_text.set_text(info_str)
+            self.ax.axis('off')
 
     def _render_ground_truth(self):
         """渲染右侧的ground truth地图及其相关元素"""
