@@ -15,7 +15,7 @@ class DualStageAgent:
         self.LOAD_LOCAL_CONTROLLER = LOAD_LOCAL_CONTROLLER
         if self.LOAD_LOCAL_CONTROLLER:
             self._load_local_controller()
-        self.location = None
+        self.location = [0, 0]
         self.map_info = None
         
         # map related parameters
@@ -185,13 +185,14 @@ class DualStageAgent:
             node.data.set_visited()
         self.node_coords, self.utility, self.guidepost, self.adjacent_matrix, self.current_index, self.neighbor_indices, self.obstacle_velocities = \
             self.update_observation()
+            
     def update_planning_state_use_nearest_node(self, global_map_info, location):
         self.update_map(global_map_info)
         # self.update_location(location)
         self.location = location
         self.update_nearest_node()
         nearest_node_location = np.array([self.nearest_node.x, self.nearest_node.y])
-        self.update_updating_map(nearest_node_location)
+        self.update_updating_map(nearest_node_location) # 更新局部地图，然后再更新前沿
         self.update_frontiers()
         self.node_manager.update_graph(nearest_node_location,
                                        self.frontier,
@@ -328,7 +329,8 @@ class DualStageAgent:
         self.v_angular = velocity[1]
     def cal_dist_to_waypoint(self, waypoint):
         # print(f"self.location: {self.location}, self.waypoint: {self.waypoint}")
-        return np.linalg.norm(self.location - waypoint)
+        return np.linalg.norm(np.array(self.location) - np.array(waypoint))
+
 
     def cal_heading_theta_to_waypoint(self, waypoint):
         return np.arctan2(waypoint[1] - self.location[1], waypoint[0] - self.location[0])

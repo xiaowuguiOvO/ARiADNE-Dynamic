@@ -65,7 +65,7 @@ OBSTACLE_CURVE_MIN_DIST = 5  # 最小障碍物轨迹距离
 OBSTACLE_CURVE_MAX_DIST = 20  # 最大障碍物轨迹距离
 
 # 时间和频率控制
-MAX_EPISODE_STEP = 64
+MAX_EPISODE_STEP = 640
 MAX_EPISODE_TIME = 300.0         # 最大模拟时间(秒)
 STEP_SIZE = 0.2               # 仿真时间步长(秒)
 DECISION_INTERVAL = 0.1         # 决策间隔时间(秒)
@@ -89,6 +89,7 @@ LOCAL_CONTROLLER_PATH = 'saved_models/best_model/actor_good.pth'
 
 # randon相关
 RANDOM_DIST = 10.0 # 随机目标点距离
+REACH_WAYPOINT_REWARD = 100.0
 
 # map相关
 GROUND_TRUTH_FREE = 255
