@@ -84,6 +84,7 @@ class Env:
         self.agent.waypoint = None
         # 随机 1 - 5001
         self.episode_index = np.random.randint(1, 5001)
+        self.episode_index = 5
         self.ground_truth, self.robot_cell = self.import_ground_truth(self.episode_index)
         self.belief_origin_x = -np.round(self.robot_cell[0] * self.cell_size, 1)   # meter
         self.belief_origin_y = -np.round(self.robot_cell[1] * self.cell_size, 1) 
@@ -98,6 +99,7 @@ class Env:
         self.robot_belief = np.ones(self.ground_truth_size) * 127
         self.robot_belief = sensor_work(self.robot_cell, round(self.sensor_range / self.cell_size), self.robot_belief,
                                         self.ground_truth)
+        self.belief_info = MapInfo(self.robot_belief, self.belief_origin_x, self.belief_origin_y, self.cell_size)
         obs = self.agent.get_robot_state()
         
         # reset render
@@ -328,15 +330,23 @@ class Env:
     def calculate_reward(self):
         "local controller reward"
         reward = 0
+        
+        r_approach = 5
+        r_heading = 1
+        r_speed = 1
+        r_static = 0.01
+        
         self.previous_distance_to_target = self.distance_to_target
         self.distance_to_target = self.agent.distance_to_target
         heading_diff = self.agent.heading_theta_diff
-        approach_reward = self.previous_distance_to_target - self.distance_to_target
-        heading_reward = (np.pi / 12) - abs(heading_diff)
-        speed_reward = self.agent.v_linear * 0.2
+        
+        approach_reward = r_approach * (self.previous_distance_to_target - self.distance_to_target)
+        heading_reward = r_heading * ((np.pi / 12) - abs(heading_diff))
+        speed_reward = r_speed * self.agent.v_linear
         static_reward, self.ray_lines = self._get_static_obstacle_reward(torch.from_numpy(self.agent.updating_map_info.map))
-        # print(static_reward * 0.01)
-        reward = approach_reward * 5 + heading_reward * 0.5 + speed_reward + static_reward * 0.01
+        static_reward = static_reward * r_static
+        # print(f"{approach_reward:.2f}, {heading_reward:.2f}, {speed_reward:.2f}, {static_reward:.2f}")
+        reward = approach_reward + heading_reward + speed_reward
         
         # if self.agent.check_arrive_waypoint(self.agent.waypoint):
             # print(f"reach waypoint, reward: {reward}")
@@ -502,6 +512,7 @@ class Env:
         # 更新robot belief
         self.update_robot_belief()
         self.agent.belief_info = self.belief_info
+        self.agent.update_map(self.belief_info)
         self.agent.update_updating_map(self.agent.location)
         self.agent.update_frontiers()
         # self.agent.update_local_belief_map()
@@ -630,7 +641,7 @@ class Env:
             self.fig.canvas.draw_idle()
             
             # 更新信息文本
-            info_str = f'v_lin: {self.agent.v_linear:.2f}  v_ang: {self.agent.v_angular:.2f}  reward: {self.total_reward:.2f} step: {self.step_count} dis: {self.agent.distance_to_target:.2f}'
+            info_str = f'v_lin: {self.agent.v_linear:.2f}  v_ang: {self.agent.v_angular:.2f}  reward: {self.total_reward:.2f} step: {self.step_count} dis: {self.agent.distance_to_target:.2f} x: {self.robot_location[0]:.2f} y: {self.robot_location[1]:.2f} c_x: {self.robot_cell[0]} c_y: {self.robot_cell[1]}'
             self.info_text.set_text(info_str)
             self.ax.axis('off')
 
@@ -640,6 +651,7 @@ class Env:
             # 初始化右边子图 - ground_truth
             self.im_truth = self.ax_truth.imshow(self.ground_truth, cmap='gray', origin='lower')
             self.robot_point_truth, = self.ax_truth.plot([], [], 'mo', markersize=5, zorder=5)
+            self.waypoint_point_truth = self.ax_truth.scatter([], [], c='blue', s=5, marker='*', zorder=5)  # 修正：在ax_truth上创建waypoint
         else:
             # 更新ground truth
             self.im_truth.set_data(self.ground_truth)
@@ -648,7 +660,15 @@ class Env:
         robot_x = (self.robot_location[0] - self.belief_origin_x) / self.cell_size
         robot_y = (self.robot_location[1] - self.belief_origin_y) / self.cell_size
         self.robot_point_truth.set_data([robot_x], [robot_y])
-        
+
+        # 更新waypoint位置 - 使用相同的坐标转换方式
+        if hasattr(self.agent, 'waypoint') and self.agent.waypoint is not None:
+            waypoint_x = (self.agent.waypoint[0] - self.belief_origin_x) / self.cell_size
+            waypoint_y = (self.agent.waypoint[1] - self.belief_origin_y) / self.cell_size
+            self.waypoint_point_truth.set_offsets([[waypoint_x, waypoint_y]])
+        else:
+            self.waypoint_point_truth.set_offsets(np.array([[]], dtype=float).reshape(0, 2))
+            
         self.ax_truth.axis('off')
 
     def _render_updating_belief_map(self):
@@ -676,7 +696,7 @@ class Env:
                 self.heading_arrow_updating = self.ax_updating.quiver([], [], [], [], color='red', scale=20, zorder=6)
                 self.frontier_points_updating = self.ax_updating.scatter([], [], c='red', s=4, marker='.', zorder=4)
                 self.info_text_updating = self.ax_updating.text(0.02, 1.05, 'Updating Belief Map', transform=self.ax_updating.transAxes)
-                self.ax_updating.set_title('Robot Updating Belief Map')
+                # self.ax_updating.set_title('Robot Updating Belief Map')
                 self.ray_lines_updating = []
             else:
                 # 更新belief map
@@ -745,8 +765,8 @@ class Env:
             # 创建1行3列的子图，增加一个用于显示updating_belief_map
             self.fig, (self.ax, self.ax_truth, self.ax_updating) = plt.subplots(1, 3, figsize=(15, 5))
             # self.ax.set_title('Global Belief Map')
-            self.ax_truth.set_title('Ground Truth')
-            self.ax_updating.set_title('Updating Belief Map')
+            # self.ax_truth.set_title('Ground Truth')
+            # self.ax_updating.set_title('Updating Belief Map')
         
         # 渲染三个子图
         self._render_belief_map()
@@ -828,6 +848,7 @@ class Env:
         返回:
             (x, y): tuple, 随机点的坐标（米）
         """
+        random_dist = RANDOM_MAX_DIST
         # 转换距离从米到像素
         random_dist_px = int(random_dist / self.cell_size)
         

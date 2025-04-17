@@ -78,7 +78,6 @@ class DualStageEnvWrapper(gym.Env):
         # 用 action 控制机器人移动
         # print("action",action)
         # print("obs", self.env.agent.get_robot_state())
-        action = [1, 0]
         robot_state, reward, terminated, truncated, info = self.env.step(action)
         obs = self._process_obs(robot_state, self.env.agent.updating_map_info.map)
         return obs, reward, terminated, truncated, info
@@ -102,7 +101,7 @@ def train_with_sb3():
         features_extractor_kwargs=dict(features_dim=128)
     )
     model = PPO("MultiInputPolicy", env, policy_kwargs=policy_kwargs,verbose=1, tensorboard_log="./ppo_sb3_tensorboard",
-                learning_rate=3e-4, n_steps=1024, batch_size=64, n_epochs=10, gamma=0.99, gae_lambda=0.95, clip_range=0.2,ent_coef=0.01)
+                learning_rate=1e-3, n_steps=512, batch_size=128, n_epochs=10, gamma=0.96, gae_lambda=0.95, clip_range=0.2,ent_coef=0.1)
     # model = PPO("MlpPolicy", env, verbose=1, tensorboard_log="./ppo_sb3_tensorboard",
     #             learning_rate=3e-4, n_steps=1024, batch_size=64, n_epochs=10, gamma=0.99, gae_lambda=0.95, clip_range=0.2,ent_coef=0.01)
     # 回调函数保存检查点和定期评估
@@ -110,7 +109,7 @@ def train_with_sb3():
                                              name_prefix='ppo_model')
 
     eval_callback = EvalCallback(eval_env, best_model_save_path='./ppo_best_model/',
-                                 log_path='./ppo_eval_logs/', eval_freq=1    ,
+                                 log_path='./ppo_eval_logs/', eval_freq=5000    ,
                                  deterministic=True, render=True, n_eval_episodes=1)
     
     # 训练

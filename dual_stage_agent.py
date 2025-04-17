@@ -52,6 +52,9 @@ class DualStageAgent:
         self.distance_to_target = 0.0
         self.heading_theta = 0.0
         self.heading_theta_diff = 0.0
+        # robot belief map
+        
+
     
     def update_waypoint(self, waypoint):
         self.waypoint = waypoint
@@ -91,6 +94,8 @@ class DualStageAgent:
 
     def get_updating_map(self, location):
         # the map includes all nodes that may be updating
+        robot_cell_x = round((location[0] + self.map_info.map_origin_x) / self.cell_size)
+        robot_cell_y = round((location[1] + self.map_info.map_origin_y) / self.cell_size)
         
         updating_map_origin_x = (location[0] - self.updating_map_size / 2)
         updating_map_origin_y = (location[1] - self.updating_map_size / 2)
@@ -145,7 +150,7 @@ class DualStageAgent:
         updating_map_info = MapInfo(full_updating_map, updating_map_origin_x, updating_map_origin_y, self.cell_size)
 
         return updating_map_info
-    
+
     def update_nearest_node(self):
         """更新与当前位置最接近的节点"""
         if self.location is None:
