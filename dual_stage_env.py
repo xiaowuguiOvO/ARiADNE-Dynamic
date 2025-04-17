@@ -286,7 +286,7 @@ class Env:
             distance = np.linalg.norm(node_pos - current_location)
             
             # 检查节点是否在指定距离范围内
-            if 0.5 <= distance <= RANDOM_DIST:
+            if 2 <= distance <= RANDOM_DIST:
                 candidate_nodes.append(node)
         
         # 如果没有符合条件的节点，返回失败

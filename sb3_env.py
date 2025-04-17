@@ -9,7 +9,8 @@ from sensor import sensor_work
 from utils import *
 import random
 from parameter import *
-
+import torch
+import math
 class Env:
     def __init__(self, episode_index, plot=False, random_wapoint=False, render_mode=None):
         self.episode_index = episode_index
@@ -65,14 +66,27 @@ class Env:
 
         self.fig = None
         self.ax = None
+        self.ax_truth = None
+        self.ax_updating = None
         self.im = None
         self.im_truth = None
+        self.im_updating = None
+        self.robot_point_updating = None
+        self.waypoint_point_updating = None
+        self.heading_arrow_updating = None
+        self.frontier_points_updating = None
+        self.ray_lines = []
+        
     def reset(self):
         # self.episode_index = np.random.randint(1, 5000)
         self.step_count = 0
         self.total_reward = 0.0
         self.agent.waypoint = None
+        # 随机 1 - 5001
+        self.episode_index = np.random.randint(1, 5001)
         self.ground_truth, self.robot_cell = self.import_ground_truth(self.episode_index)
+        self.belief_origin_x = -np.round(self.robot_cell[0] * self.cell_size, 1)   # meter
+        self.belief_origin_y = -np.round(self.robot_cell[1] * self.cell_size, 1) 
         
         self.robot_location = np.array([
         self.robot_cell[0] * self.cell_size + self.belief_origin_x,
@@ -247,9 +261,71 @@ class Env:
 
     def update_robot_belief(self):
         self.robot_belief = sensor_work(self.robot_cell, round(self.sensor_range / self.cell_size), self.robot_belief,
-                                        self.ground_truth)
+                                            self.ground_truth)
+        
+    def _get_static_obstacle_reward(self, robot_belief, num_rays=30, fov_deg=240, step_size=1):
+        """
+        加速版：使用射线投射方式计算静态障碍物奖励
 
-    def calculate_reward(self, collision=False, wall_collision=False):
+        参数:
+            robot_belief: torch.Tensor, shape=(H, W)，值为 {0, 127, 255}
+            num_rays: int，射线数量
+            fov_deg: float，激光雷达视角范围 (单位：度)
+            step_size: float，每次步进的像素距离
+
+        返回:
+            reward: torch.Tensor
+            rays: List[List[(x, y)]] 每条射线的路径，用于可视化
+        """
+        device = robot_belief.device
+        H, W = robot_belief.shape
+        cx, cy = W // 2, H // 2
+        max_radius = min(H, W) // 2
+        
+        robot_heading = self.agent.heading_theta if hasattr(self.agent, 'heading_theta') else 0.0
+        fov_rad = math.radians(fov_deg)
+        # start_angle = -fov_rad / 2
+        start_angle = robot_heading - fov_rad / 2
+        angle_step = fov_rad / num_rays
+
+        # 预计算角度单位向量
+        directions = [(math.cos(start_angle + i * angle_step), math.sin(start_angle + i * angle_step))
+                    for i in range(num_rays)]
+
+        rays = []
+        distances = []
+
+        for dx, dy in directions:
+            ray = []
+            hit = False
+
+            for s in range(1, max_radius):
+                x = int(cx + dx * s * step_size)
+                y = int(cy + dy * s * step_size)
+
+                if x < 0 or x >= W or y < 0 or y >= H:
+                    break
+
+                ray.append((x, y))
+
+                if robot_belief[y, x] == ROBOT_BELIEF_OCCUPIED:
+                    distances.append(s * step_size)
+                    hit = True
+                    break
+
+            if not hit:
+                distances.append(max_radius)
+
+            rays.append(ray)
+
+        avg_dist = sum(distances) / len(distances)
+        reward = torch.log(torch.tensor(avg_dist, dtype=torch.float32, device=device).clamp(min=1e-6))
+
+        return reward, rays
+
+
+    
+    def calculate_reward(self):
         "local controller reward"
         reward = 0
         self.previous_distance_to_target = self.distance_to_target
@@ -257,12 +333,14 @@ class Env:
         heading_diff = self.agent.heading_theta_diff
         approach_reward = self.previous_distance_to_target - self.distance_to_target
         heading_reward = (np.pi / 12) - abs(heading_diff)
-        speed_reward = self.agent.v_linear
-        reward = approach_reward * 10 + heading_reward * 0.1 + speed_reward
+        speed_reward = self.agent.v_linear * 0.2
+        static_reward, self.ray_lines = self._get_static_obstacle_reward(torch.from_numpy(self.agent.updating_map_info.map))
+        # print(static_reward * 0.01)
+        reward = approach_reward * 5 + heading_reward * 0.5 + speed_reward + static_reward * 0.01
         
-        if self.agent.check_arrive_waypoint(self.agent.waypoint):
+        # if self.agent.check_arrive_waypoint(self.agent.waypoint):
             # print(f"reach waypoint, reward: {reward}")
-            reward += REACH_WAYPOINT_REWARD
+            # reward += REACH_WAYPOINT_REWARD
         # if wall_collision:
         #     reward -= WALL_COLLISION_PENALTY
         return reward
@@ -290,42 +368,52 @@ class Env:
         
     def generate_random_waypoint(self):
         """
-        在机器人附近的NodeManager中随机选择一个节点作为目标点
+        在机器人指定范围内的自由空间随机生成一个目标点
         
         Returns:
             bool: 是否成功生成目标点
-            np.array: 生成的目标点坐标，如果失败则为None
+            np.array: 生成的目标点坐标
         """
-        if self.agent is None or self.agent.node_manager is None:
-            print("警告：agent或NodeManager未初始化")
-            return False, None
+        # 转换距离从米到像素
+        max_dist_px = int(RANDOM_MAX_DIST / self.cell_size)
+        min_dist_px = int(RANDOM_MIN_DIST / self.cell_size)
+        
+        # 获取当前机器人位置（像素坐标）
+        robot_x_px = int((self.robot_location[0] - self.belief_origin_x) / self.cell_size)
+        robot_y_px = int((self.robot_location[1] - self.belief_origin_y) / self.cell_size)
+        
+        # 获取地图尺寸
+        H, W = self.ground_truth.shape
+        
+        # 最大尝试次数
+        max_attempts = 100
+        
+        for _ in range(max_attempts):
+            # 在圆环内随机生成点
+            angle = np.random.uniform(0, 2*np.pi)
+            # 使用sqrt确保点在圆环内均匀分布
+            distance = np.random.uniform(min_dist_px**2, max_dist_px**2)**0.5
             
-        # 获取当前位置
-        current_location = self.robot_location
-        
-        # 获取NodeManager中的所有节点
-        candidate_nodes = []
-        for node in self.agent.node_manager.nodes_dict.__iter__():
-            node_pos = np.array([node.x, node.y])
-            distance = np.linalg.norm(node_pos - current_location)
+            # 计算相对偏移
+            dx = int(distance * np.cos(angle))
+            dy = int(distance * np.sin(angle))
             
-            # 检查节点是否在指定距离范围内
-            if 0.5 <= distance <= RANDOM_DIST:
-                # print(f"distance: {distance}")
-                candidate_nodes.append(node)
+            # 计算随机点坐标（像素坐标）
+            x_px = robot_x_px + dx
+            y_px = robot_y_px + dy
+            
+            # 检查点是否在地图内
+            if 0 <= x_px < W and 0 <= y_px < H:
+                # 检查点是否在自由空间
+                if self.ground_truth[y_px, x_px] == FREE:
+                    # 将像素坐标转换回米
+                    x_m = x_px * self.cell_size + self.belief_origin_x
+                    y_m = y_px * self.cell_size + self.belief_origin_y
+                    return True, np.array([x_m, y_m])
         
-        # 如果没有符合条件的节点，返回失败
-        if not candidate_nodes:
-            print(f"在距离{RANDOM_DIST}米范围内没有找到合适的节点")
-            # 找不到, waypoint设置到机器人自身位置
-            return False, self.robot_location
-    
-        # 随机选择一个候选节点
-        selected_node = random.choice(candidate_nodes)
-        selected_waypoint = np.array([selected_node.x, selected_node.y])
-        
-        # print(f"从NodeManager中选择随机目标点: {selected_waypoint}, 距离: {np.linalg.norm(selected_waypoint - current_location):.2f}m")
-        return True, selected_waypoint
+        # 如果无法找到自由空间的点，返回机器人当前位置
+        print(f"在距离{RANDOM_MIN_DIST}米到{RANDOM_MAX_DIST}米范围内没有找到合适的点")
+        return False, self.robot_location
     
     def step(self, action):
         """
@@ -338,6 +426,7 @@ class Env:
         done = False
         terminated = False
         truncated = False
+        wall_collision = False
         if self.agent is None:
             raise ValueError("必须先使用set_agent设置代理")
         # print(action)
@@ -367,7 +456,6 @@ class Env:
         current_pos = self.robot_location.copy()
         next_pos = current_pos + cartesian_velocity * self.step_size
         
-        wall_collision = self.check_wall_collision(next_pos)
         dynamic_collision = False
         # print(f"wall_collision: {wall_collision}")
         
@@ -406,6 +494,11 @@ class Env:
         # 更新动态障碍物位置
         # self.update_dynamic_obstacles(self.step_size)
         
+        # if self.check_wall_collision(self.robot_location):
+        #     wall_collision = True
+        
+        
+        
         # 更新robot belief
         self.update_robot_belief()
         self.agent.belief_info = self.belief_info
@@ -417,21 +510,22 @@ class Env:
         # 评估探索率
         self.evaluate_exploration_rate()
         # 计算奖励
-        reward = self.calculate_reward(dynamic_collision, wall_collision)
+        reward = self.calculate_reward()
         self.total_reward += reward
-
-        # if wall_collision:
-        #     done = True
         
+        # if wall_collision:
+        #     terminated = True
+        #     reward -= 100.0
         # check is arrive
         if self.agent.check_arrive_waypoint(self.agent.waypoint):
             terminated = True
-            # reward += 100.0
+            reward += 100.0
         
         self.step_count += 1
         if self.step_count >= self.max_steps:
             truncated = True
             terminated = True
+            reward -= 100.0
         done = terminated or truncated
         
         # print(self.step_count)
@@ -450,7 +544,15 @@ class Env:
             plt.close(self.fig)
             self.fig = None
             self.ax = None
+            self.ax_truth = None
+            self.ax_updating = None
             self.im = None
+            self.im_truth = None
+            self.im_updating = None
+            self.robot_point_updating = None
+            self.waypoint_point_updating = None
+            self.heading_arrow_updating = None
+            self.frontier_points_updating = None
 
     def _render_belief_map(self):
         """渲染左侧的belief map及其相关元素"""
@@ -507,14 +609,14 @@ class Env:
             map_height, map_width = self.robot_belief.shape
             # 计算updating_map的大小（栅格单位）
             size_in_cells = int(self.agent.updating_map_size / self.cell_size)
-            print(self.agent.updating_map_size, self.cell_size, size_in_cells)
+            # print(self.agent.updating_map_size, self.cell_size, size_in_cells)
             # 计算矩形框的位置，确保完全在地图范围内
             half_size = size_in_cells // 2
             rect_x = np.clip(robot_x - half_size, 0, map_width - size_in_cells)
             rect_y = np.clip(robot_y - half_size, 0, map_height - size_in_cells)
             # 打印调试信息
-            print(f"Map size: {map_width}x{map_height}, Robot pos: ({robot_x:.2f}, {robot_y:.2f})")
-            print(f"Rect pos: ({rect_x:.2f}, {rect_y:.2f}), size: {size_in_cells}")
+            # print(f"Map size: {map_width}x{map_height}, Robot pos: ({robot_x:.2f}, {robot_y:.2f})")
+            # print(f"Rect pos: ({rect_x:.2f}, {rect_y:.2f}), size: {size_in_cells}")
             # 更新矩形框
             self.updating_map_rect.set_xy((rect_x, rect_y))
             self.updating_map_rect.set_width(size_in_cells)
@@ -549,6 +651,90 @@ class Env:
         
         self.ax_truth.axis('off')
 
+    def _render_updating_belief_map(self):
+        """渲染更新中的局部belief map"""
+        # 检查agent和updating_map_info
+        if not hasattr(self, 'agent') or self.agent is None:
+            return
+        
+        try:
+            if not hasattr(self.agent, 'updating_map_info') or self.agent.updating_map_info is None:
+                return  # 如果agent没有updating_map_info属性，直接返回
+                
+            if not hasattr(self, 'im_updating') or self.im_updating is None:
+                # 初始化更新belief map的子图
+                # print(self.agent.updating_map_info.map)
+                self.im_updating = self.ax_updating.imshow(
+                    self.agent.updating_map_info.map, 
+                    cmap='gray', 
+                    origin='lower',
+                    vmin=0,    # 设置颜色映射的最小值
+                    vmax=255   # 设置颜色映射的最大值
+                )
+                self.robot_point_updating, = self.ax_updating.plot([], [], 'mo', markersize=5, zorder=5)
+                self.waypoint_point_updating = self.ax_updating.scatter([], [], c='blue', s=5, marker='*', zorder=5)
+                self.heading_arrow_updating = self.ax_updating.quiver([], [], [], [], color='red', scale=20, zorder=6)
+                self.frontier_points_updating = self.ax_updating.scatter([], [], c='red', s=4, marker='.', zorder=4)
+                self.info_text_updating = self.ax_updating.text(0.02, 1.05, 'Updating Belief Map', transform=self.ax_updating.transAxes)
+                self.ax_updating.set_title('Robot Updating Belief Map')
+                self.ray_lines_updating = []
+            else:
+                # 更新belief map
+                self.im_updating.set_data(self.agent.updating_map_info.map)
+                self.im_updating.set_clim(0, 255)
+            # 获取updating map的坐标原点和尺寸
+            updating_origin_x = self.agent.updating_map_info.map_origin_x
+            updating_origin_y = self.agent.updating_map_info.map_origin_y
+            
+            # 更新机器人位置 - 转换到updating map坐标系
+            robot_x = (self.robot_location[0] - updating_origin_x) / self.cell_size
+            robot_y = (self.robot_location[1] - updating_origin_y) / self.cell_size
+            self.robot_point_updating.set_data([robot_x], [robot_y])
+            # 更新朝向箭头
+            if hasattr(self.agent, 'heading_theta'):
+                dx = np.cos(self.agent.heading_theta)
+                dy = np.sin(self.agent.heading_theta)
+                self.heading_arrow_updating.set_offsets([[robot_x, robot_y]])
+                self.heading_arrow_updating.set_UVC(dx, dy)
+            
+            # # 清除旧的射线
+            # for line in self.ray_lines_updating:
+            #     line.remove() if line in self.ax_updating.lines else None
+            # self.ray_lines_updating.clear()
+            # # 绘制新的射线
+            # for ray in self.ray_lines:
+            #     if ray:  # 确保射线不为空
+            #         ray_x = [point[0] for point in ray]
+            #         ray_y = [point[1] for point in ray]
+            #         # 绘制射线
+            #         line, = self.ax_updating.plot(ray_x, ray_y, 'r-', alpha=0.3, linewidth=0.5, zorder=3)
+            #         self.ray_lines_updating.append(line)
+                    
+            # 更新waypoint位置
+            if hasattr(self.agent, 'waypoint') and self.agent.waypoint is not None:
+                waypoint_x = (self.agent.waypoint[0] - updating_origin_x) / self.cell_size
+                waypoint_y = (self.agent.waypoint[1] - updating_origin_y) / self.cell_size
+                self.waypoint_point_updating.set_offsets([[waypoint_x, waypoint_y]])
+            else:
+                self.waypoint_point_updating.set_offsets(np.array([[]], dtype=float).reshape(0, 2))
+            
+            # # 更新前沿点
+            # if hasattr(self.agent, 'frontier') and len(self.agent.frontier) > 0:
+            #     frontier_coords = np.array(list(self.agent.frontier))
+            #     frontier_x = (frontier_coords[:, 0] - updating_origin_x) / self.cell_size
+            #     frontier_y = (frontier_coords[:, 1] - updating_origin_y) / self.cell_size
+            #     frontier_points = np.column_stack((frontier_x, frontier_y))
+            #     self.frontier_points_updating.set_offsets(frontier_points)
+            #     self.frontier_points_updating.set_visible(True)
+            # else:
+            #     self.frontier_points_updating.set_offsets(np.array([[]], dtype=float).reshape(0, 2))
+                
+            self.ax_updating.axis('off')
+            
+        except Exception as e:
+            print(f"渲染updating belief map时出错: {e}")
+            # 在发生错误时，不阻止程序继续执行
+
     def render(self):
         """主渲染函数"""
         if self.render_mode != 'human':
@@ -556,17 +742,20 @@ class Env:
             
         if self.fig is None:
             plt.ion()
-            # 创建1行2列的子图
-            self.fig, (self.ax, self.ax_truth) = plt.subplots(1, 2, figsize=(10, 5))
+            # 创建1行3列的子图，增加一个用于显示updating_belief_map
+            self.fig, (self.ax, self.ax_truth, self.ax_updating) = plt.subplots(1, 3, figsize=(15, 5))
+            # self.ax.set_title('Global Belief Map')
+            self.ax_truth.set_title('Ground Truth')
+            self.ax_updating.set_title('Updating Belief Map')
         
-        # 渲染两个子图
+        # 渲染三个子图
         self._render_belief_map()
         self._render_ground_truth()
+        self._render_updating_belief_map()
         
         # 更新显示
         self.fig.canvas.draw()
         self.fig.canvas.flush_events()
-            
     def plot_env(self, step):
         plt.subplot(1, 3, 1)
         # 使用ground_truth代替robot_belief
@@ -628,3 +817,60 @@ class Env:
         frame = '{}/{}_{}_samples.png'.format(gifs_path, self.episode_index, step)
         plt.close()
         self.frame_files.append(frame)
+
+    def generate_random_point_in_free_space(self, random_dist):
+        """
+        在机器人周围RANDOM_DIST范围内的自由空间随机生成一个点
+        
+        参数:
+            random_dist: float, 随机点与机器人的最大距离（米）
+        
+        返回:
+            (x, y): tuple, 随机点的坐标（米）
+        """
+        # 转换距离从米到像素
+        random_dist_px = int(random_dist / self.cell_size)
+        
+        # 获取当前机器人位置（像素坐标）
+        robot_x_px = int((self.robot_location[0] - self.belief_origin_x) / self.cell_size)
+        robot_y_px = int((self.robot_location[1] - self.belief_origin_y) / self.cell_size)
+        
+        # 获取地图尺寸
+        H, W = self.robot_belief.shape
+        
+        # 最大尝试次数
+        max_attempts = 100
+        
+        for _ in range(max_attempts):
+            # 在圆内随机生成点
+            # 随机角度和距离
+            angle = np.random.uniform(0, 2*np.pi)
+            # 使用sqrt确保点在圆内均匀分布
+            distance = np.random.uniform(0, random_dist_px**2)**0.5
+            
+            # 计算相对偏移
+            dx = int(distance * np.cos(angle))
+            dy = int(distance * np.sin(angle))
+            
+            # 计算随机点坐标（像素坐标）
+            x_px = robot_x_px + dx
+            y_px = robot_y_px + dy
+            
+            # 检查点是否在地图内
+            if 0 <= x_px < W and 0 <= y_px < H:
+                # 检查点是否在自由空间 (ROBOT_BELIEF_FREE = 255)
+                if self.robot_belief[y_px, x_px] == 255:  # 假设255表示自由空间
+                    # 将像素坐标转换回米
+                    x_m = x_px * self.cell_size + self.belief_origin_x
+                    y_m = y_px * self.cell_size + self.belief_origin_y
+                    return (x_m, y_m)
+        
+        # 如果无法找到自由空间的点，回退到在圆内随机生成点（不考虑自由空间）
+        angle = np.random.uniform(0, 2*np.pi)
+        distance = np.random.uniform(0, random_dist)
+        
+        x_m = self.robot_location[0] + distance * np.cos(angle)
+        y_m = self.robot_location[1] + distance * np.sin(angle)
+        
+        print("警告：无法在自由空间找到随机点，生成了一个可能在障碍物内的点")
+        return (x_m, y_m)

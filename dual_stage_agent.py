@@ -91,11 +91,9 @@ class DualStageAgent:
 
     def get_updating_map(self, location):
         # the map includes all nodes that may be updating
-        updating_map_origin_x = (location[
-                                  0] - self.updating_map_size / 2)
-        updating_map_origin_y = (location[
-                                  1] - self.updating_map_size / 2)
-
+        
+        updating_map_origin_x = (location[0] - self.updating_map_size / 2)
+        updating_map_origin_y = (location[1] - self.updating_map_size / 2)
         updating_map_top_x = updating_map_origin_x + self.updating_map_size
         updating_map_top_y = updating_map_origin_y + self.updating_map_size
 
@@ -129,11 +127,22 @@ class DualStageAgent:
         updating_map_top = np.array([updating_map_top_x, updating_map_top_y])
         updating_map_top_in_global_map = get_cell_position_from_coords(updating_map_top, self.map_info)
 
-        updating_map = self.map_info.map[
+        # 创建固定大小的地图，用未知空间填充
+        map_pixels = int(self.updating_map_size / self.cell_size)
+        full_updating_map = np.ones((map_pixels, map_pixels), dtype=self.map_info.map.dtype) * ROBOT_BELIEF_UNKNOWN
+
+        # 获取实际地图部分
+        actual_map = self.map_info.map[
                     updating_map_origin_in_global_map[1]:updating_map_top_in_global_map[1]+1,
                     updating_map_origin_in_global_map[0]:updating_map_top_in_global_map[0]+1]
 
-        updating_map_info = MapInfo(updating_map, updating_map_origin_x, updating_map_origin_y, self.cell_size)
+        # 将实际地图部分复制到固定大小的地图中心
+        h, w = actual_map.shape
+        start_h = (map_pixels - h) // 2
+        start_w = (map_pixels - w) // 2
+        full_updating_map[start_h:start_h+h, start_w:start_w+w] = actual_map
+
+        updating_map_info = MapInfo(full_updating_map, updating_map_origin_x, updating_map_origin_y, self.cell_size)
 
         return updating_map_info
     
