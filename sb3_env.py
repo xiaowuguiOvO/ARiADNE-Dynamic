@@ -76,6 +76,8 @@ class Env:
         self.heading_arrow_updating = None
         self.frontier_points_updating = None
         self.ray_lines = []
+        self.previous_v_angular = 0.0
+        self.previous_v_linear = 0.0
         
     def reset(self):
         # self.episode_index = np.random.randint(1, 5000)
@@ -335,24 +337,40 @@ class Env:
         r_heading = 1
         r_speed = 1
         r_static = 0.01
+        r_smooth_linear = -0.5
+        r_smooth_angular = -1.0
         
         self.previous_distance_to_target = self.distance_to_target
         self.distance_to_target = self.agent.distance_to_target
         heading_diff = self.agent.heading_theta_diff
         
+        current_v_linear = self.agent.v_linear
+        current_v_angular = self.agent.v_angular
+        # 计算速度变化 (需要确保 self.previous_v_linear/angular 在 step 中被正确更新)
+        delta_v_linear = abs(current_v_linear - getattr(self, 'previous_v_linear', current_v_linear)) # 使用 getattr 提供默认值以防首次调用
+        delta_v_angular = abs(current_v_angular - getattr(self, 'previous_v_angular', current_v_angular))
+        
+        
+        
+        
         approach_reward = r_approach * (self.previous_distance_to_target - self.distance_to_target)
         heading_reward = r_heading * ((np.pi / 12) - abs(heading_diff))
+        # heading_reward = r_heading * np.cos(heading_diff) # 直接使用角度差的余弦值
         speed_reward = r_speed * self.agent.v_linear
         static_reward, self.ray_lines = self._get_static_obstacle_reward(torch.from_numpy(self.agent.updating_map_info.map))
         static_reward = static_reward * r_static
-        # print(f"{approach_reward:.2f}, {heading_reward:.2f}, {speed_reward:.2f}, {static_reward:.2f}")
-        reward = approach_reward + heading_reward + speed_reward
+        linear_smooth_penalty = r_smooth_linear * delta_v_linear
+        angular_smooth_penalty = r_smooth_angular * delta_v_angular
+        print(f"{approach_reward:.2f}, {heading_reward:.2f}, {speed_reward:.2f}, {static_reward:.2f}, {linear_smooth_penalty:.2f}, {angular_smooth_penalty:.2f}")
+        reward = approach_reward + heading_reward + speed_reward + static_reward + linear_smooth_penalty + angular_smooth_penalty
         
         # if self.agent.check_arrive_waypoint(self.agent.waypoint):
             # print(f"reach waypoint, reward: {reward}")
             # reward += REACH_WAYPOINT_REWARD
         # if wall_collision:
         #     reward -= WALL_COLLISION_PENALTY
+        self.previous_v_linear = current_v_linear
+        self.previous_v_angular = current_v_angular
         return reward
 
     def evaluate_exploration_rate(self):
@@ -504,8 +522,8 @@ class Env:
         # 更新动态障碍物位置
         # self.update_dynamic_obstacles(self.step_size)
         
-        # if self.check_wall_collision(self.robot_location):
-        #     wall_collision = True
+        if self.check_wall_collision(self.robot_location):
+            wall_collision = True
         
         
         

@@ -11,6 +11,7 @@ from stable_baselines3.common.vec_env import DummyVecEnv
 from parameter import *
 import imageio
 from belief_cnn import BeliefFeatureExtractor
+import argparse
 print(f"SB3版本: {stable_baselines3.__version__}")
 
 class DualStageEnvWrapper(gym.Env):
@@ -92,6 +93,12 @@ class DualStageEnvWrapper(gym.Env):
         pass
 
 def train_with_sb3():
+    # 参数解析
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--load-model', type=str, help='model path',default=None)
+    parser.add_argument('--total-timesteps', type=int, default=100000, help='total step')
+    args = parser.parse_args()
+    
     # 构造包装后的环境，训练环境可以不开启渲染，评估环境开启渲染有助于观察训练效果
     agent = DualStageAgent(LOAD_LOCAL_CONTROLLER=False)
     env = DualStageEnvWrapper(episode_index=0, plot=False, random_waypoint=True, agent=agent, render_mode=None)
@@ -100,7 +107,11 @@ def train_with_sb3():
         features_extractor_class=BeliefFeatureExtractor,
         features_extractor_kwargs=dict(features_dim=128)
     )
-    model = PPO("MultiInputPolicy", env, policy_kwargs=policy_kwargs,verbose=1, tensorboard_log="./ppo_sb3_tensorboard",
+    if args.load_model:
+        print(f"Loading existing model from {args.load_model}")
+        model = PPO.load(args.load_model, env=env, tensorboard_log="./ppo_sb3_tensorboard", learning_rate=3e-4, n_steps=512, batch_size=128, n_epochs=10, gamma=0.96, gae_lambda=0.95, clip_range=0.2,ent_coef=0.01)
+    else:
+        model = PPO("MultiInputPolicy", env, policy_kwargs=policy_kwargs,verbose=1, tensorboard_log="./ppo_sb3_tensorboard",
                 learning_rate=1e-3, n_steps=512, batch_size=128, n_epochs=10, gamma=0.96, gae_lambda=0.95, clip_range=0.2,ent_coef=0.1)
     # model = PPO("MlpPolicy", env, verbose=1, tensorboard_log="./ppo_sb3_tensorboard",
     #             learning_rate=3e-4, n_steps=1024, batch_size=64, n_epochs=10, gamma=0.99, gae_lambda=0.95, clip_range=0.2,ent_coef=0.01)
@@ -111,15 +122,12 @@ def train_with_sb3():
     eval_callback = EvalCallback(eval_env, best_model_save_path='./ppo_best_model/',
                                  log_path='./ppo_eval_logs/', eval_freq=5000    ,
                                  deterministic=True, render=True, n_eval_episodes=1)
-    
     # 训练
     total_timesteps = 100000  # 
     model.learn(total_timesteps=total_timesteps, callback=[checkpoint_callback, eval_callback])
-    
     # 保存最终模型
     model.save("ppo_sb3_final_model")
     print("训练结束，模型已保存。")
-    
 
 if __name__ == "__main__":
     train_with_sb3()

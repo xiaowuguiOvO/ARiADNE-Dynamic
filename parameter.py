@@ -88,8 +88,8 @@ ENTROPY_TARGET = -2.0
 LOCAL_CONTROLLER_PATH = 'saved_models/best_model/actor_good.pth'
 
 # randon相关
-RANDOM_MIN_DIST = 3
-RANDOM_MAX_DIST = 7 # 随机目标点距离
+RANDOM_MIN_DIST = 7
+RANDOM_MAX_DIST = 15 # 随机目标点距离
 REACH_WAYPOINT_REWARD = 500.0
 
 # map相关
