@@ -52,7 +52,7 @@ class DualStageEnvWrapper(gym.Env):
 def evaluate_model():
     # 加载训练好的模型
     # model = PPO.load("ppo_checkpoints/ppo_model_50000_steps.zip")
-    model = PPO.load("ppo_sb3_final_model_4_17_can_nav.zip")  
+    model = PPO.load("ppo_checkpoints/ppo_model_20000_steps.zip")  
 
     # 创建 agent 和环境（开启 human 渲染）
     agent = DualStageAgent(LOAD_LOCAL_CONTROLLER=False)
