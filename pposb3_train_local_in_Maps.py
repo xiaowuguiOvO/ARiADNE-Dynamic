@@ -41,12 +41,6 @@ class DualStageEnvWrapper(gym.Env):
                 dtype=np.float32
             )
         })
-        # self.observation_space = gym.spaces.Box(
-        #     low=np.array(low),
-        #     high=np.array(high),
-        #     shape=(4,),
-        #     dtype=np.float32
-        # )
         
         self.action_space = gym.spaces.Box(
             low=np.array([0, -1.0]), high=np.array([1.0, 1.0]), dtype=np.float32
@@ -109,9 +103,9 @@ def train_with_sb3():
     )
     if args.load_model:
         print(f"Loading existing model from {args.load_model}")
-        model = PPO.load(args.load_model, env=env, tensorboard_log="./ppo_sb3_tensorboard", learning_rate=3e-4, n_steps=512, batch_size=128, n_epochs=10, gamma=0.96, gae_lambda=0.95, clip_range=0.2,ent_coef=0.01)
+        model = PPO.load(args.load_model, env=env,policy_kwargs = policy_kwargs, tensorboard_log="./ppo_sb3_tensorboard", learning_rate=3e-4, n_steps=512, batch_size=128, n_epochs=10, gamma=0.96, gae_lambda=0.95, clip_range=0.2,ent_coef=0.01)
     else:
-        model = PPO("MultiInputPolicy", env, policy_kwargs=policy_kwargs,verbose=1, tensorboard_log="./ppo_sb3_tensorboard",
+        model = PPO("MultiInputPolicy", env,policy_kwargs = policy_kwargs, verbose=1, tensorboard_log="./ppo_sb3_tensorboard",
                 learning_rate=1e-3, n_steps=512, batch_size=128, n_epochs=10, gamma=0.96, gae_lambda=0.95, clip_range=0.2,ent_coef=0.02)
     # model = PPO("MlpPolicy", env, verbose=1, tensorboard_log="./ppo_sb3_tensorboard",
     #             learning_rate=3e-4, n_steps=1024, batch_size=64, n_epochs=10, gamma=0.99, gae_lambda=0.95, clip_range=0.2,ent_coef=0.01)

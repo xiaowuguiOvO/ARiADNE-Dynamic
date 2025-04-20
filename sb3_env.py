@@ -337,7 +337,7 @@ class Env:
         
         r_approach = 5
         r_heading = 1
-        r_speed = 0.5
+        r_speed = 1
         r_static = 0.01
         r_smooth_linear = -0.1
         r_smooth_angular = -1
@@ -363,7 +363,7 @@ class Env:
         linear_smooth_penalty = r_smooth_linear * delta_v_linear
         angular_smooth_penalty = r_smooth_angular * delta_v_angular
         # print(f"{approach_reward:.2f}, {heading_reward:.2f}, {speed_reward:.2f}, {static_reward:.2f}, {linear_smooth_penalty:.2f}, {angular_smooth_penalty:.2f}")
-        reward = approach_reward + heading_reward + speed_reward + static_reward + angular_smooth_penalty
+        reward = approach_reward + heading_reward + speed_reward + static_reward
         
         # if self.agent.check_arrive_waypoint(self.agent.waypoint):
             # print(f"reach waypoint, reward: {reward}")
