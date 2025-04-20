@@ -11,6 +11,8 @@ import random
 from parameter import *
 import torch
 import math
+import gymnasium as gym   # 如果你在训练脚本里用的是 gymnasium
+
 class Env:
     def __init__(self, episode_index, plot=False, random_wapoint=False, render_mode=None):
         self.episode_index = episode_index
@@ -335,10 +337,11 @@ class Env:
         
         r_approach = 5
         r_heading = 1
-        r_speed = 1
+        r_speed = 0.5
         r_static = 0.01
-        r_smooth_linear = -0.5
-        r_smooth_angular = -1.0
+        r_smooth_linear = -0.1
+        r_smooth_angular = -1
+        # 这个smoth 的参数好像不对 加上去就寄了
         
         self.previous_distance_to_target = self.distance_to_target
         self.distance_to_target = self.agent.distance_to_target
@@ -350,19 +353,17 @@ class Env:
         delta_v_linear = abs(current_v_linear - getattr(self, 'previous_v_linear', current_v_linear)) # 使用 getattr 提供默认值以防首次调用
         delta_v_angular = abs(current_v_angular - getattr(self, 'previous_v_angular', current_v_angular))
         
-        
-        
-        
         approach_reward = r_approach * (self.previous_distance_to_target - self.distance_to_target)
         heading_reward = r_heading * ((np.pi / 12) - abs(heading_diff))
+        # heading_reward = r_heading * np.cos(heading_diff) # 改用余弦奖励
         # heading_reward = r_heading * np.cos(heading_diff) # 直接使用角度差的余弦值
         speed_reward = r_speed * self.agent.v_linear
         static_reward, self.ray_lines = self._get_static_obstacle_reward(torch.from_numpy(self.agent.updating_map_info.map))
         static_reward = static_reward * r_static
         linear_smooth_penalty = r_smooth_linear * delta_v_linear
         angular_smooth_penalty = r_smooth_angular * delta_v_angular
-        print(f"{approach_reward:.2f}, {heading_reward:.2f}, {speed_reward:.2f}, {static_reward:.2f}, {linear_smooth_penalty:.2f}, {angular_smooth_penalty:.2f}")
-        reward = approach_reward + heading_reward + speed_reward + static_reward + linear_smooth_penalty + angular_smooth_penalty
+        # print(f"{approach_reward:.2f}, {heading_reward:.2f}, {speed_reward:.2f}, {static_reward:.2f}, {linear_smooth_penalty:.2f}, {angular_smooth_penalty:.2f}")
+        reward = approach_reward + heading_reward + speed_reward + static_reward + angular_smooth_penalty
         
         # if self.agent.check_arrive_waypoint(self.agent.waypoint):
             # print(f"reach waypoint, reward: {reward}")
@@ -913,3 +914,88 @@ class Env:
         
         print("警告：无法在自由空间找到随机点，生成了一个可能在障碍物内的点")
         return (x_m, y_m)
+    
+    
+
+class DualStageEnvWrapper(gym.Env):
+    def __init__(self, episode_index=0, plot=True, random_waypoint=True, agent=None,render_mode=None):
+        
+        super(DualStageEnvWrapper, self).__init__()
+        self.agent = agent
+        self.render_mode = render_mode
+        self.env = Env(episode_index, plot, random_waypoint, render_mode)
+        self.env.set_agent(self.agent)
+        self.env.agent.update_planning_state(self.env.belief_info, self.env.robot_location)
+        # 定义 observation_space，假设是一个二维地图 flatten 成 1D
+        low = -np.inf * np.ones(4, dtype=np.float32)
+        high = np.inf * np.ones(4, dtype=np.float32)
+        map_pixels = int(UPDATING_MAP_SIZE / CELL_SIZE)  # 应该是 85
+        self.observation_space = gym.spaces.Dict({
+            "belief": gym.spaces.Box(
+                low=0.0,
+                high=1.0,
+                shape=(map_pixels, map_pixels, 3),
+                dtype=np.float32# 3通道 代表三种状态
+            ),
+            "robot_state": gym.spaces.Box(
+                low=low,
+                high=high,
+                shape=(4,),
+                dtype=np.float32
+            )
+        })
+        # self.observation_space = gym.spaces.Box(
+        #     low=np.array(low),
+        #     high=np.array(high),
+        #     shape=(4,),
+        #     dtype=np.float32
+        # )
+        
+        self.action_space = gym.spaces.Box(
+            low=np.array([0, -1.0]), high=np.array([1.0, 1.0]), dtype=np.float32
+        )
+        self.frame_idx = 0
+
+    def _process_belief_map(self, belief_map):
+        # 把belief map 转成三通道
+        belief_map = np.stack((belief_map == ROBOT_BELIEF_FREE, belief_map == ROBOT_BELIEF_OCCUPIED, belief_map == ROBOT_BELIEF_UNKNOWN), axis=-1)
+        return belief_map
+    
+    def seed(self, seed=None):
+        # 兼容旧版 Gym
+        self.reset(seed=seed)
+        return [seed]
+    
+    def _process_robot_state(self, robot_state):
+        return robot_state
+    
+    def _process_obs(self, robot_state, belief_map):
+        belief_map_processed = self._process_belief_map(belief_map)
+        obs = {
+            "belief": belief_map_processed.astype(np.float32),
+            "robot_state": np.array(robot_state, dtype=np.float32)
+        }
+        return obs
+    
+    def reset(self, seed=None, options=None):
+        # 重置环境 随机选一张地图
+        robot_state, _ = self.env.reset()
+        obs = self._process_obs(robot_state, self.env.agent.updating_map_info.map)
+        return obs, {}
+
+    def step(self, action):
+        # 用 action 控制机器人移动
+        # print("action",action)
+        # print("obs", self.env.agent.get_robot_state())
+        robot_state, reward, terminated, truncated, info = self.env.step(action)
+        obs = self._process_obs(robot_state, self.env.agent.updating_map_info.map)
+        return obs, reward, terminated, truncated, info
+
+    def render(self):
+        # print("render")
+        if self.render_mode == 'human':
+            self.env.render()  # 你自己内部的渲染逻辑
+        pass
+
+    def close(self):
+        pass
