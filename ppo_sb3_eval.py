@@ -1,7 +1,7 @@
 import gymnasium as gym
 from stable_baselines3 import PPO
 from dual_stage_agent import DualStageAgent
-from sb3_env import Env
+from sb3_local_env import Env
 from parameter import *
 import numpy as np
 from time import sleep
@@ -52,7 +52,7 @@ class DualStageEnvWrapper(gym.Env):
 def evaluate_model():
     # 加载训练好的模型
     # model = PPO.load("ppo_checkpoints/ppo_model_50000_steps.zip")
-    model = PPO.load("ppo_checkpoints/ppo_model_20000_steps.zip")  
+    model = PPO.load("ppo_checkpoints/ppo_model_130000_steps.zip")  
 
     # 创建 agent 和环境（开启 human 渲染）
     agent = DualStageAgent(LOAD_LOCAL_CONTROLLER=False)

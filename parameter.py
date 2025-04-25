@@ -11,7 +11,7 @@ SAVE_IMG_GAP = 200  # how many episodes before saving a gif
 
 # map and planning resolution
 CELL_SIZE = 0.4  # meter, your map resolution
-NODE_RESOLUTION = 1  # meter, your node resolution
+NODE_RESOLUTION = 4 # meter, your node resolution
 FRONTIER_CELL_SIZE = 2 * CELL_SIZE  # do you want to downsample the frontiers
 
 # map representation
@@ -25,7 +25,7 @@ UTILITY_RANGE = 0.8 * SENSOR_RANGE  # consider frontiers within this range as ob
 MIN_UTILITY = 2  # ignore the utility if observable frontiers are less than this value
 
 # updating map range w.r.t the robot , 这里指的是边长
-UPDATING_MAP_SIZE = SENSOR_RANGE * 2 + NODE_RESOLUTION * 2  # nodes outsi de this range will not be affected by current measurements
+UPDATING_MAP_SIZE = SENSOR_RANGE * 2 + 1 * 2  # nodes outsi de this range will not be affected by current measurements
 
 # training parameters
 REPLAY_SIZE = 10000
@@ -59,7 +59,6 @@ ROBOT_RADIUS = 0.3             # 机器人半径 (m)
 COLLISION_PENALTY = 0       # 碰撞惩罚
 SAFE_DISTANCE = 1.5            # 安全距离 (m)
 PROXIMITY_PENALTY = 1        # 接近惩罚系数
-WALL_COLLISION_PENALTY = 5  # 墙壁碰撞惩罚
 
 OBSTACLE_CURVE_MIN_DIST = 5  # 最小障碍物轨迹距离
 OBSTACLE_CURVE_MAX_DIST = 20  # 最大障碍物轨迹距离
@@ -85,12 +84,13 @@ SAVE_INTERVAL = 100  # 每隔多少轮保存一次模型
 
 ENTROPY_TARGET = -2.0  
 
-LOCAL_CONTROLLER_PATH = 'saved_models/best_model/actor_good.pth'
+LOCAL_CONTROLLER_PATH = 'ppo_best_model/ppo_avoid_col_4_21.zip'
 
 # randon相关
 RANDOM_MIN_DIST = 7
 RANDOM_MAX_DIST = 15 # 随机目标点距离
-REACH_WAYPOINT_REWARD = 500.0
+REACH_WAYPOINT_REWARD = 100.0
+WALL_COLLISION_PENALTY = 100  # 墙壁碰撞惩罚
 
 # map相关
 GROUND_TRUTH_FREE = 255

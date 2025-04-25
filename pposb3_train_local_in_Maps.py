@@ -5,7 +5,7 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback
 import os
 import stable_baselines3
-from sb3_env import Env
+from sb3_local_env import Env
 from dual_stage_agent import DualStageAgent
 from stable_baselines3.common.vec_env import DummyVecEnv
 from parameter import *
@@ -114,7 +114,7 @@ def train_with_sb3():
                                              name_prefix='ppo_model')
 
     eval_callback = EvalCallback(eval_env, best_model_save_path='./ppo_best_model/',
-                                 log_path='./ppo_eval_logs/', eval_freq=5000    ,
+                                 log_path='./ppo_eval_logs/', eval_freq=10000    ,
                                  deterministic=True, render=True, n_eval_episodes=1)
     # 训练
     total_timesteps = 1000000  # 

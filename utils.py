@@ -50,7 +50,7 @@ def get_free_area_coords(map_info):
 
 def get_free_and_connected_map(location, map_info):
     # a binary map for free and connected areas
-    free = (map_info.map == FREE).astype(float)
+    free = (map_info. map == FREE).astype(float)
     labeled_free = label(free, connectivity=2)
     cell = get_cell_position_from_coords(location, map_info)
     label_number = labeled_free[cell[1], cell[0]]
@@ -63,7 +63,6 @@ def get_updating_node_coords(location, updating_map_info, check_connectivity=Tru
     y_min = updating_map_info.map_origin_y
     x_max = updating_map_info.map_origin_x + (updating_map_info.map.shape[1] - 1) * CELL_SIZE
     y_max = updating_map_info.map_origin_y + (updating_map_info.map.shape[0] - 1) * CELL_SIZE
-
     if x_min % NODE_RESOLUTION != 0:
         x_min = (x_min // NODE_RESOLUTION + 1) * NODE_RESOLUTION
     if x_max % NODE_RESOLUTION != 0:
@@ -157,6 +156,16 @@ def frontier_down_sample(data, voxel_size=FRONTIER_CELL_SIZE):
 
 def check_collision(start, end, map_info):
     # Bresenham line algorithm checking
+    # 检查端点是否在地图范围内
+    map_width = map_info.map_origin_x + map_info.map.shape[1] * map_info.cell_size
+    map_height = map_info.map_origin_y + map_info.map.shape[0] * map_info.cell_size
+    
+    # 如果任一端点超出地图范围，认为有碰撞
+    if (start[0] < map_info.map_origin_x or start[0] >= map_width or
+        start[1] < map_info.map_origin_y or start[1] >= map_height or
+        end[0] < map_info.map_origin_x or end[0] >= map_width or
+        end[1] < map_info.map_origin_y or end[1] >= map_height):
+        return True
     assert start[0] >= map_info.map_origin_x
     assert start[1] >= map_info.map_origin_y
     assert end[0] >= map_info.map_origin_x

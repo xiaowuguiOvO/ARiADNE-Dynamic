@@ -77,7 +77,6 @@ class DualStageAgent:
         self.v_angular = v_angular
     
     def check_arrive_waypoint(self, waypoint):
-        # print(f"waypoint distance: {self.cal_dist_to_waypoint(waypoint)}")
         if self.cal_dist_to_waypoint(waypoint) < WAYPOINT_THRESHOLD:
             return True
         else:
@@ -92,6 +91,54 @@ class DualStageAgent:
     def update_location(self, location):
         self.location = location
 
+
+    def get_updating_map_old(self, location):
+        # the map includes all nodes that may be updating
+        updating_map_origin_x = (location[
+                                  0] - self.updating_map_size / 2)
+        updating_map_origin_y = (location[
+                                  1] - self.updating_map_size / 2)
+
+        updating_map_top_x = updating_map_origin_x + self.updating_map_size
+        updating_map_top_y = updating_map_origin_y + self.updating_map_size
+
+        min_x = self.map_info.map_origin_x
+        min_y = self.map_info.map_origin_y
+        max_x = (self.map_info.map_origin_x + self.cell_size * (self.map_info.map.shape[1] - 1))
+        max_y = (self.map_info.map_origin_y + self.cell_size * (self.map_info.map.shape[0] - 1))
+
+        if updating_map_origin_x < min_x:
+            updating_map_origin_x = min_x
+        if updating_map_origin_y < min_y:
+            updating_map_origin_y = min_y
+        if updating_map_top_x > max_x:
+            updating_map_top_x = max_x
+        if updating_map_top_y > max_y:
+            updating_map_top_y = max_y
+
+        updating_map_origin_x = (updating_map_origin_x // self.cell_size + 1) * self.cell_size
+        updating_map_origin_y = (updating_map_origin_y // self.cell_size + 1) * self.cell_size
+        updating_map_top_x = (updating_map_top_x // self.cell_size) * self.cell_size
+        updating_map_top_y = (updating_map_top_y // self.cell_size) * self.cell_size
+
+        updating_map_origin_x = np.round(updating_map_origin_x, 1)
+        updating_map_origin_y = np.round(updating_map_origin_y, 1)
+        updating_map_top_x = np.round(updating_map_top_x, 1)
+        updating_map_top_y = np.round(updating_map_top_y, 1)
+
+        updating_map_origin = np.array([updating_map_origin_x, updating_map_origin_y])
+        updating_map_origin_in_global_map = get_cell_position_from_coords(updating_map_origin, self.map_info)
+
+        updating_map_top = np.array([updating_map_top_x, updating_map_top_y])
+        updating_map_top_in_global_map = get_cell_position_from_coords(updating_map_top, self.map_info)
+
+        updating_map = self.map_info.map[
+                    updating_map_origin_in_global_map[1]:updating_map_top_in_global_map[1]+1,
+                    updating_map_origin_in_global_map[0]:updating_map_top_in_global_map[0]+1]
+
+        updating_map_info = MapInfo(updating_map, updating_map_origin_x, updating_map_origin_y, self.cell_size)
+
+        return updating_map_info
     def get_updating_map(self, location):
         # the map includes all nodes that may be updating
         robot_cell_x = round((location[0] + self.map_info.map_origin_x) / self.cell_size)
@@ -256,11 +303,21 @@ class DualStageAgent:
         utility = np.array(utility)
         guidepost = np.array(guidepost)
 
+        rounded_location = np.round(self.location).astype(int)
+        print(self.location, rounded_location)
+        print(self.nearest_node)
+        print(node_coords_to_check)
         # current_index = np.argwhere(node_coords_to_check == self.location[0] + self.location[1] * 1j)[0][0]
         if self.nearest_node is not None:
-            current_index = np.argwhere(node_coords_to_check == self.nearest_node.x + self.nearest_node.y * 1j)[0][0]
+            target_complex = self.nearest_node.x + self.nearest_node.y * 1j
+            # 使用距离计算找最近的节点
+            distances = np.abs(node_coords_to_check - target_complex)
+            current_index = np.argmin(distances)
         else:
-            current_index = np.argwhere(node_coords_to_check == self.location[0] + self.location[1] * 1j)[0][0]
+            rounded_location = np.round(self.location).astype(int)
+            target_complex = rounded_location[0] + rounded_location[1] * 1j
+            distances = np.abs(node_coords_to_check - target_complex)
+            current_index = np.argmin(distances)
         neighbor_indices = np.argwhere(adjacent_matrix[current_index] == 0).reshape(-1)
         return all_node_coords, utility, guidepost, adjacent_matrix, current_index, neighbor_indices, obstacle_velocities
 

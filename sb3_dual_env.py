@@ -12,6 +12,7 @@ from parameter import *
 import torch
 import math
 import gymnasium as gym   # 如果你在训练脚本里用的是 gymnasium
+from node_manager import NodeManager
 
 class Env:
     def __init__(self, episode_index, plot=False, random_wapoint=False, render_mode=None):
@@ -22,7 +23,7 @@ class Env:
         self.cell_size = CELL_SIZE  # meter
         self.random_wapoint = random_wapoint # 是否随机生成目标点
         self.agent = None
-        self.robot_location = np.array([0.0, 0.0])  # meter
+        self.robot_location = np.array([0.0, 0.0])  # meter  #这是机器人的相对位置，0 0 就是机器人的出生点
         self.robot_belief = np.ones(self.ground_truth_size) * 127
         self.belief_origin_x = -np.round(self.robot_cell[0] * self.cell_size, 1)   # meter
         self.belief_origin_y = -np.round(self.robot_cell[1] * self.cell_size, 1)  # meter
@@ -82,13 +83,12 @@ class Env:
         self.previous_v_linear = 0.0
         
     def reset(self):
-        # self.episode_index = np.random.randint(1, 5000)
         self.step_count = 0
         self.total_reward = 0.0
         self.agent.waypoint = None
         # 随机 1 - 5001
         self.episode_index = np.random.randint(1, 5001)
-        self.episode_index = 5
+        # self.episode_index = 5
         self.ground_truth, self.robot_cell = self.import_ground_truth(self.episode_index)
         self.belief_origin_x = -np.round(self.robot_cell[0] * self.cell_size, 1)   # meter
         self.belief_origin_y = -np.round(self.robot_cell[1] * self.cell_size, 1) 
@@ -105,7 +105,10 @@ class Env:
                                         self.ground_truth)
         self.belief_info = MapInfo(self.robot_belief, self.belief_origin_x, self.belief_origin_y, self.cell_size)
         obs = self.agent.get_robot_state()
-        
+        # reset
+        self.agent.node_manager.reset()
+        self.agent.update_nearest_node()
+        self.agent.update_planning_state(self.belief_info, self.robot_location)
         # reset render
         if self.render_mode == 'human':
             self._reset_render()
@@ -113,6 +116,8 @@ class Env:
         # random waypoint
         if self.random_wapoint:
             _, self.agent.waypoint = self.generate_random_waypoint()
+            
+
         return obs, {}
     
     def set_agent(self, agent):
@@ -486,7 +491,6 @@ class Env:
         next_pos = current_pos + cartesian_velocity * self.step_size
         
         dynamic_collision = False
-        # print(f"wall_collision: {wall_collision}")
         
         # 保存原始控制命令用于记录
         self.velocity_command = velocity_command  # [linear, angular]
@@ -534,6 +538,7 @@ class Env:
         self.agent.update_map(self.belief_info)
         self.agent.update_updating_map(self.agent.location)
         self.agent.update_frontiers()
+        self.agent.update_planning_state_use_nearest_node(self.belief_info, self.robot_location)
         # self.agent.update_local_belief_map()
         # 累计总移动距离
         self.travel_dist += total_dist
@@ -558,7 +563,6 @@ class Env:
             reward -= 100.0
         done = terminated or truncated
         
-        # print(self.step_count)
         obs = self.agent.get_robot_state()
         if self.plot:
             self.plot_env(self.step_count)
@@ -568,6 +572,7 @@ class Env:
                 
         return obs, reward, terminated, truncated, {}
     
+
     def _reset_render(self):
         # 清除之前的图像
         if hasattr(self, 'fig') and self.fig:
@@ -593,6 +598,7 @@ class Env:
             self.waypoint_point = self.ax.scatter([], [], c='blue', s=5, marker='*', zorder=5)
             self.heading_arrow = self.ax.quiver([], [], [], [], color='red', scale=20, zorder=6)
             self.frontier_points = self.ax.scatter([], [], c='red', s=4, marker='.', zorder=4)
+            self.nodes = self.ax.scatter([], [], c='orange', s=4, marker='.', zorder=4)
             self.info_text = self.ax.text(0.02, 1.05, '', transform=self.ax.transAxes)
             self.updating_map_rect = plt.Rectangle((0, 0), 1, 1, fill=False, color='green', linewidth=2, zorder=7)
             self.ax.add_patch(self.updating_map_rect)
@@ -620,6 +626,41 @@ class Env:
         else:
             self.waypoint_point.set_offsets(np.array([[]], dtype=float).reshape(0, 2))
         
+        # # 地图上画出节点
+        # if hasattr(self.agent, 'node_coords') and len(self.agent.node_coords) > 0:
+        #     all_coords = []
+        #     for coords in self.agent.node_coords:
+        #         coord_x = (coords[0] - self.belief_origin_x) / self.cell_size
+        #         coord_y = (coords[1] - self.belief_origin_y) / self.cell_size
+        #         all_coords.append([coord_x, coord_y])
+        #     # 一次性设置所有节点坐标
+        #     self.nodes.set_offsets(all_coords)
+        #     self.nodes.set_visible(True)
+        #     self.nodes.set_zorder(4)
+        #     self.nodes.set_sizes([5] * len(all_coords))  # 为每个点设置尺寸
+        #     self.nodes.set_color('orange')
+        # else:
+        #     # 没有节点时清空
+        #     self.nodes.set_offsets(np.array([[]], dtype=float).reshape(0, 2))
+        # 地图上画出节点
+        if hasattr(self.agent, 'node_coords') and len(self.agent.node_coords) > 0:
+            try:
+                # 转换所有节点坐标
+                nodes = get_cell_position_from_coords(self.agent.node_coords, self.agent.map_info)
+                # 设置节点位置
+                self.nodes.set_offsets(nodes)
+                # 设置节点颜色 - 使用utility值
+                self.nodes.set_array(np.array(self.agent.utility))
+                # 确保可见性和其他属性
+                self.nodes.set_visible(True)
+                self.nodes.set_zorder(4)
+                self.nodes.set_sizes([5] * len(self.agent.node_coords))
+            except Exception as e:
+                print(f"绘制节点时出错: {e}")
+                self.nodes.set_offsets(np.array([[]], dtype=float).reshape(0, 2))
+        else:
+            # 没有节点时清空
+            self.nodes.set_offsets(np.array([[]], dtype=float).reshape(0, 2))
         # 更新前沿点
         if hasattr(self.agent, 'frontier') and len(self.agent.frontier) > 0:
             frontier_coords = np.array(list(self.agent.frontier))

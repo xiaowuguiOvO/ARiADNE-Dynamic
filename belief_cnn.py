@@ -24,7 +24,6 @@ class BeliefFeatureExtractor(BaseFeaturesExtractor):
     def __init__(self, observation_space: gym.spaces.Dict, features_dim: int = 128):
         super(BeliefFeatureExtractor, self).__init__(observation_space, features_dim)
 
-        # Belief 是图像 → 使用更深的CNN结构
         self.belief_cnn = nn.Sequential(
             nn.Conv2d(3, 16, kernel_size=5, stride=2),  # 85x85 → 41x41
             nn.BatchNorm2d(16),
@@ -40,14 +39,12 @@ class BeliefFeatureExtractor(BaseFeaturesExtractor):
             nn.ReLU(),
         )
         
-        # 添加空间注意力机制
         self.spatial_attention = SpatialAttention(kernel_size=5)
         
-        # 最后进行平均池化和展平，大幅减少特征维度
         self.global_pool = nn.AdaptiveAvgPool2d((3, 3))
         
         # 计算CNN输出后的特征维度
-        belief_output_dim = 64 * 3 * 3  # 576，比原来的6400小得多
+        belief_output_dim = 64 * 3 * 3  # 576
         
         # 为机器人状态单独添加一个小型MLP
         self.robot_state_mlp = nn.Sequential(
