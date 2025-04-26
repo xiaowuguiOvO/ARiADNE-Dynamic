@@ -38,7 +38,7 @@ def get_coords_from_cell_position(cell_position, map_info):
     if coords.shape[0] == 1:
         return coords[0]
     else:
-        return coords
+        return coords   
 
 
 def get_free_area_coords(map_info):

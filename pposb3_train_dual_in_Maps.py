@@ -27,26 +27,64 @@ class DualStageEnvWrapper(gym.Env):
         low = -np.inf * np.ones(4, dtype=np.float32)
         high = np.inf * np.ones(4, dtype=np.float32)
         map_pixels = int(UPDATING_MAP_SIZE / CELL_SIZE)  # 应该是 85
+        # self.observation_space = gym.spaces.Dict({
+        #     "belief": gym.spaces.Box(
+        #         low=0.0,
+        #         high=1.0,
+        #         shape=(map_pixels, map_pixels, 3),
+        #         dtype=np.float32# 3通道 代表三种状态
+        #     ),
+        #     "robot_state": gym.spaces.Box(
+        #         low=low,
+        #         high=high,
+        #         shape=(4,),
+        #         dtype=np.float32
+        #     )
+        # })
+        # self.action_space = gym.spaces.Box(
+        #     low=np.array([0, -1.0]), high=np.array([1.0, 1.0]), dtype=np.float32
+        # )
         self.observation_space = gym.spaces.Dict({
-            "belief": gym.spaces.Box(
-                low=0.0,
-                high=1.0,
-                shape=(map_pixels, map_pixels, 3),
-                dtype=np.float32# 3通道 代表三种状态
-            ),
-            "robot_state": gym.spaces.Box(
-                low=low,
-                high=high,
-                shape=(4,),
+            "node_inputs": gym.spaces.Box(
+                low=-np.inf,
+                high=np.inf,
+                shape=(1, NODE_PADDING_SIZE, 4),  # node_coords(2) + utility(1) + guidepost(1)
                 dtype=np.float32
+            ),
+            "node_padding_mask": gym.spaces.Box(
+                low=0,
+                high=1,
+                shape=(1, 1, NODE_PADDING_SIZE),
+                dtype=np.int16
+            ),
+            "edge_mask": gym.spaces.Box(
+                low=0,
+                high=1,
+                shape=(1, NODE_PADDING_SIZE, NODE_PADDING_SIZE),
+                dtype=np.float32
+            ),
+            "current_index": gym.spaces.Box(
+                low=0,
+                high=NODE_PADDING_SIZE,
+                shape=(1, 1, 1),
+                dtype=np.int64
+            ),
+            "current_edge": gym.spaces.Box(
+                low=0,
+                high=NODE_PADDING_SIZE,
+                shape=(1, K_SIZE, 1),
+                dtype=np.int64
+            ),
+            "edge_padding_mask": gym.spaces.Box(
+                low=0,
+                high=1,
+                shape=(1, 1, K_SIZE),
+                dtype=np.int16
             )
         })
         
-        self.action_space = gym.spaces.Box(
-            low=np.array([0, -1.0]), high=np.array([1.0, 1.0]), dtype=np.float32
-        )
-        self.frame_idx = 0
-
+        self.action_space = gym.spaces.Discrete(NODE_PADDING_SIZE)
+        
     def _process_belief_map(self, belief_map):
         # 把belief map 转成三通道
         belief_map = np.stack((belief_map == ROBOT_BELIEF_FREE, belief_map == ROBOT_BELIEF_OCCUPIED, belief_map == ROBOT_BELIEF_UNKNOWN), axis=-1)
@@ -73,6 +111,7 @@ class DualStageEnvWrapper(gym.Env):
         # 用 action 控制机器人移动
         # print("action",action)
         # print("obs", self.env.agent.get_robot_state())
+        # action = [1, 0]
         robot_state, reward, terminated, truncated, info = self.env.step(action)
         obs = self._process_obs(robot_state, self.env.agent.updating_map_info.map)
         return obs, reward, terminated, truncated, info
