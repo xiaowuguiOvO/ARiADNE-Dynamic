@@ -33,7 +33,7 @@ MINIMUM_BUFFER_SIZE = 100
 BATCH_SIZE = 64
 LR = 1e-5
 GAMMA = 1
-NUM_META_AGENT = 16  # how many threads does your CPU have
+NUM_META_AGENT = 4  # how many threads does your CPU have
 
 # network parameters
 # NODE_INPUT_DIM = 4
@@ -64,7 +64,7 @@ OBSTACLE_CURVE_MIN_DIST = 5  # 最小障碍物轨迹距离
 OBSTACLE_CURVE_MAX_DIST = 20  # 最大障碍物轨迹距离
 
 # 时间和频率控制
-MAX_EPISODE_STEP = 1280 #512
+MAX_EPISODE_STEP = 512 #512
 MAX_EPISODE_TIME = 300.0         # 最大模拟时间(秒)
 STEP_SIZE = 0.2               # 仿真时间步长(秒)
 DECISION_INTERVAL = 0.1         # 决策间隔时间(秒)

@@ -1,6 +1,6 @@
 import torch
 import ray
-from dual_stage_model import WaypointSelector, LocalController, WayPointQNet
+from dual_stage_model import WaypointSelector
 from dual_stage_worker import DualStageWorker
 from parameter import *
 

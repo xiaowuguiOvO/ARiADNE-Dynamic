@@ -40,7 +40,8 @@ class DualStageWorker:
         self.robot.env = self.env
         self.waypoint_index = None
         self.perf_metrics = dict()
-        # 使用字典替代纯索引列表，提高可读性
+        
+        self.episode_buffer = []
         for i in range(15):
             self.episode_buffer.append([])
 
@@ -55,12 +56,6 @@ class DualStageWorker:
 
     def save_action(self, action_index):
         self.episode_buffer[6] += action_index
-        
-    def save_velocity(self, velocity_vector):
-        """保存速度向量到经验缓冲区"""
-        if not isinstance(velocity_vector, torch.Tensor):
-            velocity_vector = torch.tensor(velocity_vector, device=self.device)
-        self.episode_buffer[6] += velocity_vector.reshape(1, 2, 1)
         
     def save_reward_done(self, reward, done):
         self.episode_buffer[7] += torch.FloatTensor([reward]).reshape(1, 1, 1).to(self.device)
@@ -86,13 +81,13 @@ class DualStageWorker:
         step_count = 0
         save_exp = True
         self.robot.plot_env()
-        self.env.plot_env(step_count)
+        if self.save_image:
+            self.env.plot_env(step_count)
         next_waypoint = None
         while simulation_time < max_simulation_time and step_count < MAX_EPISODE_STEP and not done:
             reward, collision = self.env.step()
             # print(f"reward: {reward}, collision: {collision}, need_decision: {need_decision}")
             observation = self.robot.get_observation()
-            self.save_observation(observation)
             self.robot.update_planning_state_use_nearest_node(self.env.belief_info, self.env.robot_location)
             # select next waypoint
             
@@ -103,14 +98,10 @@ class DualStageWorker:
                     next_waypoint, action_index = self.robot.select_next_waypoint(observation)
                     
                 need_decision = False
+                save_exp = True
                 self.robot.update_waypoint(next_waypoint)
-                    # self.robot.decompose_path_to_waypoint()
                 self.robot.current_path_index = 0
-                print(f"path_points: {self.robot.path_points}")
-                # self.robot.update_waypoint([4, -4])
-
             # update velocity
-            print('next',next_waypoint)
             self.robot.update_robot_state(next_waypoint)
             state = self.robot.get_robot_state()
             robot_local_belief = self.robot.get_robot_local_belief()
@@ -123,7 +114,7 @@ class DualStageWorker:
             # if self.robot.check_arrive_waypoint(self.robot.path_points[self.robot.current_path_index]):
             #     self.robot.current_path_index += 1
             
-            if save_exp and not self.train_local_controller:
+            if save_exp:
                 self.save_observation(observation)
                 self.save_action(action_index)
                 next_observation = self.robot.get_observation()
@@ -150,5 +141,5 @@ if __name__ == "__main__":
     # model = (NODE_INPUT_DIM, EMBEDDING_DIM)
     # checkpoint = torch.load(model_path + '/checkpoint.pth', map_location='cpu')
     # model.load_state_dict(checkpoint['policy_model'])
-    worker = DualStageWorker(0, 22, save_image=True, random_wapoint=True, train_local_controller=False)
+    worker = DualStageWorker(0, 22, save_image=True, random_wapoint=False, train_local_controller=False)
     worker.run_episode()

@@ -271,61 +271,61 @@ class WaypointSelector(nn.Module):
 #         a = self.tanh(self.layer3(s))
 #         return a
     
-# class WayPointQNet(nn.Module):
-#     def __init__(self, node_dim, embedding_dim):
-#         super(WayPointQNet, self).__init__()
+class WayPointQNet(nn.Module):
+    def __init__(self, node_dim, embedding_dim):
+        super(WayPointQNet, self).__init__()
 
-#         # local graph encoder
-#         self.initial_embedding = nn.Linear(node_dim, embedding_dim)
-#         self.encoder = Encoder(embedding_dim=embedding_dim, n_head=8, n_layer=6)
+        # local graph encoder
+        self.initial_embedding = nn.Linear(node_dim, embedding_dim)
+        self.encoder = Encoder(embedding_dim=embedding_dim, n_head=8, n_layer=6)
 
-#         # decoder
-#         self.decoder = Decoder(embedding_dim=embedding_dim, n_head=8, n_layer=1)
-#         self.current_embedding = nn.Linear(embedding_dim * 2, embedding_dim)
+        # decoder
+        self.decoder = Decoder(embedding_dim=embedding_dim, n_head=8, n_layer=1)
+        self.current_embedding = nn.Linear(embedding_dim * 2, embedding_dim)
 
-#         self.q_values_layer = nn.Linear(embedding_dim * 2, 1)
+        self.q_values_layer = nn.Linear(embedding_dim * 2, 1)
 
-#     def encode_graph(self, node_inputs, node_padding_mask, edge_mask):
-#         node_feature = self.initial_embedding(node_inputs)
-#         enhanced_node_feature = self.encoder(src=node_feature,
-#                                                          key_padding_mask=node_padding_mask,
-#                                                          attn_mask=edge_mask)
+    def encode_graph(self, node_inputs, node_padding_mask, edge_mask):
+        node_feature = self.initial_embedding(node_inputs)
+        enhanced_node_feature = self.encoder(src=node_feature,
+                                                         key_padding_mask=node_padding_mask,
+                                                         attn_mask=edge_mask)
 
-#         return enhanced_node_feature
+        return enhanced_node_feature
 
-#     def decode_state(self, enhanced_node_feature, current_index, node_padding_mask):
-#         embedding_dim = enhanced_node_feature.size()[2]
-#         current_node_feature = torch.gather(enhanced_node_feature, 1,
-#                                                   current_index.repeat(1, 1, embedding_dim))
-#         enhanced_current_node_feature, _ = self.decoder(current_node_feature,
-#                                                                     enhanced_node_feature,
-#                                                                     node_padding_mask)
+    def decode_state(self, enhanced_node_feature, current_index, node_padding_mask):
+        embedding_dim = enhanced_node_feature.size()[2]
+        current_node_feature = torch.gather(enhanced_node_feature, 1,
+                                                  current_index.repeat(1, 1, embedding_dim))
+        enhanced_current_node_feature, _ = self.decoder(current_node_feature,
+                                                                    enhanced_node_feature,
+                                                                    node_padding_mask)
 
-#         return current_node_feature, enhanced_current_node_feature
+        return current_node_feature, enhanced_current_node_feature
 
-#     def output_q(self, current_node_feature, enhanced_current_node_feature, enhanced_node_feature,
-#                  current_edge, edge_padding_mask):
-#         embedding_dim = enhanced_node_feature.size()[2]
-#         k_size = current_edge.size()[1]
-#         # current_state_feature = current_node_feature
-#         current_state_feature = self.current_embedding(torch.cat((enhanced_current_node_feature,
-#                                                                  current_node_feature), dim=-1))
+    def output_q(self, current_node_feature, enhanced_current_node_feature, enhanced_node_feature,
+                 current_edge, edge_padding_mask):
+        embedding_dim = enhanced_node_feature.size()[2]
+        k_size = current_edge.size()[1]
+        # current_state_feature = current_node_feature
+        current_state_feature = self.current_embedding(torch.cat((enhanced_current_node_feature,
+                                                                 current_node_feature), dim=-1))
 
-#         neighboring_feature = torch.gather(enhanced_node_feature, 1,
-#                                            current_edge.repeat(1, 1, embedding_dim))
+        neighboring_feature = torch.gather(enhanced_node_feature, 1,
+                                           current_edge.repeat(1, 1, embedding_dim))
 
-#         action_features = torch.cat((current_state_feature.repeat(1, k_size, 1), neighboring_feature), dim=-1)
-#         q_values = self.q_values_layer(action_features)
-#         return q_values
+        action_features = torch.cat((current_state_feature.repeat(1, k_size, 1), neighboring_feature), dim=-1)
+        q_values = self.q_values_layer(action_features)
+        return q_values
 
-#     def forward(self, node_inputs, node_padding_mask, edge_mask, current_index,
-#                 current_edge, edge_padding_mask):
-#         enhanced_node_feature = self.encode_graph(node_inputs, node_padding_mask, edge_mask)
-#         current_node_feature, enhanced_current_node_feature = self.decode_state(enhanced_node_feature, current_index, node_padding_mask)
-#         q_values = self.output_q(current_node_feature, enhanced_current_node_feature,
-#                                  enhanced_node_feature, current_edge, edge_padding_mask)
+    def forward(self, node_inputs, node_padding_mask, edge_mask, current_index,
+                current_edge, edge_padding_mask):
+        enhanced_node_feature = self.encode_graph(node_inputs, node_padding_mask, edge_mask)
+        current_node_feature, enhanced_current_node_feature = self.decode_state(enhanced_node_feature, current_index, node_padding_mask)
+        q_values = self.output_q(current_node_feature, enhanced_current_node_feature,
+                                 enhanced_node_feature, current_edge, edge_padding_mask)
 
-#         return q_values
+        return q_values
 
 # class ControllerQNetwork(nn.Module):
 #     def __init__(self, state_dim, action_dim):
@@ -370,4 +370,4 @@ class WaypointSelector(nn.Module):
 #         x = F.relu(self.fc1(state))
 #         x = F.relu(self.fc2(x))
 #         value = self.value_head(x)
-#         return value
+#         return valueLocalController
