@@ -1,17 +1,18 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from dual_stage_model import WaypointSelector, LocalController
+from dual_stage_model import WaypointSelector
 from parameter import *
 from node_manager import NodeManager
 import numpy as np
 from utils import *
 import matplotlib.pyplot as plt
+from stable_baselines3 import PPO
+
 class DualStageAgent:
     def __init__(self, device='cpu', LOAD_LOCAL_CONTROLLER=False):
         self.device = device
         self.waypoint_selector = WaypointSelector(node_dim=NODE_INPUT_DIM, embedding_dim=EMBEDDING_DIM)  
-        self.local_controller = LocalController()
         self.LOAD_LOCAL_CONTROLLER = LOAD_LOCAL_CONTROLLER
         if self.LOAD_LOCAL_CONTROLLER:
             self._load_local_controller()
@@ -59,22 +60,47 @@ class DualStageAgent:
     def update_waypoint(self, waypoint):
         self.waypoint = waypoint
     
+    # load sb3 ppo local controller
     def _load_local_controller(self):
-        # 先创建模型实例
-        self.local_controller = LocalController(state_dim=4, action_dim=2).to(self.device)
-        # 然后加载状态字典
-        state_dict = torch.load(LOCAL_CONTROLLER_PATH, map_location=self.device)
-        self.local_controller.load_state_dict(state_dict)
-        self.local_controller.eval()  # 设置为评估模式
+        try:
+            # 加载PPO模型
+            self.local_controller = PPO.load(LOCAL_CONTROLLER_PATH, device=self.device)
+            print(f"Successfully loaded SB3 PPO model from {LOCAL_CONTROLLER_PATH}")
+        except Exception as e:
+            print(f"Error loading SB3 model: {e}")
+            raise
+    # get local action from sb3 ppo local controller
+    def get_local_action(self, state, robot_belief):
+        if not hasattr(self, 'local_controller'):
+            raise RuntimeError("Local controller not loaded")
+        # 将状态转换为模型期望的格式
+        observation = {
+            "belief": robot_belief.astype(np.float32),
+            "robot_state": np.array(state, dtype=np.float32)
+        }
+        # 使用PPO模型预测动作
+        with torch.no_grad():
+            action, _ = self.local_controller.predict(observation, deterministic=True)
+        return action
     
     def get_robot_state(self):
         return [self.distance_to_target, self.heading_theta_diff, self.v_linear, self.v_angular]
     
-    def update_robot_state(self, distance_to_target, heading_theta_diff, v_linear, v_angular):
+    def get_robot_local_belief(self):
+        local_map = self.updating_map_info.map
+        local_map = self._process_belief_map(local_map)
+        return local_map
+    def _process_belief_map(self, belief_map):
+        # 把belief map 转成三通道
+        belief_map = np.stack((belief_map == ROBOT_BELIEF_FREE, belief_map == ROBOT_BELIEF_OCCUPIED, belief_map == ROBOT_BELIEF_UNKNOWN), axis=-1)
+        return belief_map
+    
+    def update_robot_state(self, waypoint):
+        distance_to_target = self.cal_dist_to_waypoint(waypoint)
+        heading_theta_diff = self.cal_heading_theta_diff_to_waypoint(waypoint)
         self.distance_to_target = distance_to_target
         self.heading_theta_diff = heading_theta_diff
-        self.v_linear = v_linear
-        self.v_angular = v_angular
+
     
     def check_arrive_waypoint(self, waypoint):
         if self.cal_dist_to_waypoint(waypoint) < WAYPOINT_THRESHOLD:
@@ -304,9 +330,7 @@ class DualStageAgent:
         guidepost = np.array(guidepost)
 
         rounded_location = np.round(self.location).astype(int)
-        print(self.location, rounded_location)
-        print(self.nearest_node)
-        print(node_coords_to_check)
+
         # current_index = np.argwhere(node_coords_to_check == self.location[0] + self.location[1] * 1j)[0][0]
         if self.nearest_node is not None:
             target_complex = self.nearest_node.x + self.nearest_node.y * 1j
@@ -382,18 +406,19 @@ class DualStageAgent:
         # self.next_waypoint_index = waypoint_index
         return next_waypoint, waypoint_index
     
-    def cal_next_velocity(self, waypoint):
-        distance_to_target = self.cal_dist_to_waypoint(waypoint)
-        heading_theta_diff = self.cal_heading_theta_diff_to_waypoint(waypoint)
-        state = np.array([distance_to_target, 
-                         heading_theta_diff,
-                         self.v_linear, 
-                         self.v_angular])
+        
+    # def cal_next_velocity(self, waypoint):
+    #     distance_to_target = self.cal_dist_to_waypoint(waypoint)
+    #     heading_theta_diff = self.cal_heading_theta_diff_to_waypoint(waypoint)
+    #     state = np.array([distance_to_target, 
+    #                      heading_theta_diff,
+    #                      self.v_linear, 
+    #                      self.v_angular])
                 
-        with torch.no_grad(): 
-            velocity = self.local_controller(torch.FloatTensor(state).to(self.device))
-        velocity = velocity.cpu().numpy()
-        return velocity, state
+    #     with torch.no_grad(): 
+    #         velocity = self.local_controller(torch.FloatTensor(state).to(self.device))
+    #     velocity = velocity.cpu().numpy()
+    #     return velocity, state
 
     def update_velocity(self, velocity):
         self.v_linear = velocity[0]

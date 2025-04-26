@@ -13,6 +13,31 @@ import imageio
 from belief_cnn import BeliefFeatureExtractor
 import argparse
 print(f"SB3版本: {stable_baselines3.__version__}")
+from stable_baselines3 import SAC
+from stable_baselines3.sac.policies import SACPolicy
+from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
+from sb3_sac_model import WaypointSelectorSAC
+from discrete_sac import DiscreteSAC, DiscreteSACPolicy
+
+class CustomExtractor(BaseFeaturesExtractor):
+    def __init__(self, observation_space, features_dim=128):
+        super().__init__(observation_space, features_dim)
+        self.waypoint_selector = WaypointSelectorSAC(
+            node_dim=4,
+            embedding_dim=128,
+            action_dim=features_dim
+        )
+    
+    def forward(self, observations):
+        # 从observations字典中提取所需的输入
+        return self.waypoint_selector(
+            observations["node_inputs"],
+            observations["node_padding_mask"],
+            observations["edge_mask"],
+            observations["current_index"],
+            observations["current_edge"],
+            observations["edge_padding_mask"]
+        )
 
 class DualStageEnvWrapper(gym.Env):
     def __init__(self, episode_index=0, plot=True, random_waypoint=True, agent=None,render_mode=None):
@@ -93,18 +118,14 @@ class DualStageEnvWrapper(gym.Env):
     def _process_robot_state(self, robot_state):
         return robot_state
     
-    def _process_obs(self, robot_state, belief_map):
-        belief_map_processed = self._process_belief_map(belief_map)
-        obs = {
-            "belief": belief_map_processed.astype(np.float32),
-            "robot_state": np.array(robot_state, dtype=np.float32)
-        }
+    def _process_obs(self):
+        obs = obs
         return obs
     
     def reset(self, seed=None, options=None):
         # 重置环境 随机选一张地图
         robot_state, _ = self.env.reset()
-        obs = self._process_obs(robot_state, self.env.agent.updating_map_info.map)
+        obs = self._process_obs()
         return obs, {}
 
     def step(self, action):
@@ -112,8 +133,8 @@ class DualStageEnvWrapper(gym.Env):
         # print("action",action)
         # print("obs", self.env.agent.get_robot_state())
         # action = [1, 0]
-        robot_state, reward, terminated, truncated, info = self.env.step(action)
-        obs = self._process_obs(robot_state, self.env.agent.updating_map_info.map)
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        obs = self._process_obs(obs, self.env.agent.updating_map_info.map)
         return obs, reward, terminated, truncated, info
 
     def render(self):
@@ -125,42 +146,60 @@ class DualStageEnvWrapper(gym.Env):
     def close(self):
         pass
 
-def train_with_sb3():
+def train_with_discrete_sac():
     # 参数解析
     parser = argparse.ArgumentParser()
-    parser.add_argument('--load-model', type=str, help='model path',default=None)
+    parser.add_argument('--load-model', type=str, help='model path', default=None)
     parser.add_argument('--total-timesteps', type=int, default=100000, help='total step')
     args = parser.parse_args()
     
-    # 构造包装后的环境，训练环境可以不开启渲染，评估环境开启渲染有助于观察训练效果
-    agent = DualStageAgent(LOAD_LOCAL_CONTROLLER=False)
-    env = DualStageEnvWrapper(episode_index=0, plot=False, random_waypoint=True, agent=agent, render_mode=None)
-    eval_env = DummyVecEnv([lambda: DualStageEnvWrapper(episode_index=0, plot=False, random_waypoint=True, agent=agent, render_mode='human')])
+    # 构造环境
+    agent = DualStageAgent(LOAD_LOCAL_CONTROLLER=True)
+    env = DualStageEnvWrapper(episode_index=0, plot=False, random_waypoint=True, 
+                             agent=agent, render_mode=None)
+    eval_env = DummyVecEnv([lambda: DualStageEnvWrapper(
+        episode_index=0, plot=False, random_waypoint=True, 
+        agent=agent, render_mode='human')])
+    
+    # 策略配置
     policy_kwargs = dict(
-        features_extractor_class=BeliefFeatureExtractor,
-        features_extractor_kwargs=dict(features_dim=128)
+        features_extractor_class=CustomExtractor,
+        features_extractor_kwargs=dict(features_dim=128),
+        net_arch=dict(pi=[256, 256], qf=[256, 256])
     )
+    
+    # 创建或加载模型
     if args.load_model:
-        print(f"Loading existing model from {args.load_model}")
-        model = PPO.load(args.load_model, env=env,policy_kwargs = policy_kwargs, tensorboard_log="./ppo_sb3_tensorboard", learning_rate=3e-4, n_steps=512, batch_size=128, n_epochs=10, gamma=0.96, gae_lambda=0.95, clip_range=0.2,ent_coef=0.01)
+        model = DiscreteSAC.load(args.load_model, env=env, tensorboard_log="./discrete_sac_tensorboard/")
     else:
-        model = PPO("MultiInputPolicy", env,policy_kwargs = policy_kwargs, verbose=1, tensorboard_log="./ppo_sb3_tensorboard",
-                learning_rate=1e-3, n_steps=512, batch_size=128, n_epochs=10, gamma=0.96, gae_lambda=0.95, clip_range=0.2,ent_coef=0.02)
-    # model = PPO("MlpPolicy", env, verbose=1, tensorboard_log="./ppo_sb3_tensorboard",
-    #             learning_rate=3e-4, n_steps=1024, batch_size=64, n_epochs=10, gamma=0.99, gae_lambda=0.95, clip_range=0.2,ent_coef=0.01)
-    # 回调函数保存检查点和定期评估
-    checkpoint_callback = CheckpointCallback(save_freq=10000, save_path='./ppo_checkpoints/',
-                                             name_prefix='ppo_model')
-
-    eval_callback = EvalCallback(eval_env, best_model_save_path='./ppo_best_model/',
-                                 log_path='./ppo_eval_logs/', eval_freq=10    ,
-                                 deterministic=True, render=True, n_eval_episodes=1)
+        model = DiscreteSAC(
+            DiscreteSACPolicy,
+            env,
+            policy_kwargs=policy_kwargs,
+            learning_rate=3e-4,
+            buffer_size=1000000,
+            learning_starts=100,
+            batch_size=256,
+            tau=0.005,
+            gamma=0.99,
+            train_freq=1,
+            gradient_steps=1,
+            ent_coef="auto",
+            tensorboard_log="./discrete_sac_tensorboard/"
+        )
+    
+    # 回调函数保持不变
+    checkpoint_callback = CheckpointCallback(...)
+    eval_callback = EvalCallback(...)
+    
     # 训练
-    total_timesteps = 1000000  # 
-    model.learn(total_timesteps=total_timesteps, callback=[checkpoint_callback, eval_callback])
+    model.learn(
+        total_timesteps=args.total_timesteps,
+        callback=[checkpoint_callback, eval_callback]
+    )
+    
     # 保存最终模型
-    model.save("ppo_sb3_final_model")
-    print("训练结束，模型已保存。")
+    model.save("discrete_sac_final_model")
 
 if __name__ == "__main__":
-    train_with_sb3()
+    train_with_discrete_sac()

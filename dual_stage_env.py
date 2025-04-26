@@ -266,40 +266,52 @@ class Env:
         
     def generate_random_waypoint(self):
         """
-        在机器人附近的NodeManager中随机选择一个节点作为目标点
+        在机器人指定范围内的自由空间随机生成一个目标点
         
         Returns:
             bool: 是否成功生成目标点
-            np.array: 生成的目标点坐标，如果失败则为None
+            np.array: 生成的目标点坐标
         """
-        if self.agent is None or self.agent.node_manager is None:
-            print("警告：agent或NodeManager未初始化")
-            return False, None
+        # 转换距离从米到像素
+        max_dist_px = int(RANDOM_MAX_DIST / self.cell_size)
+        min_dist_px = int(RANDOM_MIN_DIST / self.cell_size)
+        
+        # 获取当前机器人位置（像素坐标）
+        robot_x_px = int((self.robot_location[0] - self.belief_origin_x) / self.cell_size)
+        robot_y_px = int((self.robot_location[1] - self.belief_origin_y) / self.cell_size)
+        
+        # 获取地图尺寸
+        H, W = self.ground_truth.shape
+        
+        # 最大尝试次数
+        max_attempts = 100
+        
+        for _ in range(max_attempts):
+            # 在圆环内随机生成点
+            angle = np.random.uniform(0, 2*np.pi)
+            # 使用sqrt确保点在圆环内均匀分布
+            distance = np.random.uniform(min_dist_px**2, max_dist_px**2)**0.5
             
-        # 获取当前位置
-        current_location = self.robot_location
-        
-        # 获取NodeManager中的所有节点
-        candidate_nodes = []
-        for node in self.agent.node_manager.nodes_dict.__iter__():
-            node_pos = np.array([node.x, node.y])
-            distance = np.linalg.norm(node_pos - current_location)
+            # 计算相对偏移
+            dx = int(distance * np.cos(angle))
+            dy = int(distance * np.sin(angle))
             
-            # 检查节点是否在指定距离范围内
-            if 2 <= distance <= RANDOM_DIST:
-                candidate_nodes.append(node)
+            # 计算随机点坐标（像素坐标）
+            x_px = robot_x_px + dx
+            y_px = robot_y_px + dy
+            
+            # 检查点是否在地图内
+            if 0 <= x_px < W and 0 <= y_px < H:
+                # 检查点是否在自由空间
+                if self.ground_truth[y_px, x_px] == FREE:
+                    # 将像素坐标转换回米
+                    x_m = x_px * self.cell_size + self.belief_origin_x
+                    y_m = y_px * self.cell_size + self.belief_origin_y
+                    return True, np.array([x_m, y_m])
         
-        # 如果没有符合条件的节点，返回失败
-        if not candidate_nodes:
-            print(f"在距离{RANDOM_DIST}米范围内没有找到合适的节点")
-            return False, None
-    
-        # 随机选择一个候选节点
-        selected_node = random.choice(candidate_nodes)
-        selected_waypoint = np.array([selected_node.x, selected_node.y])
-        
-        # print(f"从NodeManager中选择随机目标点: {selected_waypoint}, 距离: {np.linalg.norm(selected_waypoint - current_location):.2f}m")
-        return True, selected_waypoint
+        # 如果无法找到自由空间的点，返回机器人当前位置
+        print(f"在距离{RANDOM_MIN_DIST}米到{RANDOM_MAX_DIST}米范围内没有找到合适的点")
+        return False, self.robot_location
     
     def step(self):
         """
@@ -467,14 +479,16 @@ class Env:
         #               np.cos(self.agent.heading_theta), np.sin(self.agent.heading_theta),
         #               color='magenta', scale=20, zorder=6)
             
-        plt.suptitle('Explored: {:.4g}  Distance: {:.4g}  Collisions: {}  Linear: {:.2f} Angular: {:.2f} Total Reward: {:.2f} Heading: {:.2f}'.format(
+        plt.suptitle('Explored: {:.4g}  Distance: {:.4g}  Collisions: {}  Linear: {:.2f} Angular: {:.2f} Total Reward: {:.2f} Heading: {:.2f} dis_to_waypoint: {:.2f} heading_diff: {:.2f}'.format(
             self.explored_rate, 
             self.travel_dist, 
             self.collision_count,
             self.velocity_command[0],
             self.velocity_command[1],
             self.total_reward,
-            self.agent.heading_theta
+            self.agent.heading_theta,
+            self.agent.distance_to_target,
+            self.agent.heading_theta_diff
         ))
         plt.tight_layout()
         plt.savefig('{}/{}_{}_samples.png'.format(gifs_path, self.episode_index, step), dpi=150)

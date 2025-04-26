@@ -8,8 +8,7 @@ from collections import deque, namedtuple
 import random
 import time
 from copy import deepcopy
-
-from dual_stage_model import WaypointSelector, LocalController, WayPointQNet, ControllerQNetwork
+from parameter import *
 from dual_stage_env import Env  # 从正确的文件导入Env类
 from dual_stage_agent import DualStageAgent
 from utils import *
@@ -40,40 +39,32 @@ class DualStageWorker:
         self.robot = DualStageAgent(device=self.device, LOAD_LOCAL_CONTROLLER=True)
         self.robot.env = self.env
         self.waypoint_index = None
+        self.perf_metrics = dict()
         # 使用字典替代纯索引列表，提高可读性
-        self.episode_buffer = {
-            'node_inputs': [],
-            'node_padding_mask': [],
-            'edge_mask': [],
-            'current_index': [],
-            'current_edge': [],
-            'edge_padding_mask': [],
-            'velocity': [],
-            'reward': [],
-            'done': [],
-            'next_node_inputs': [],
-            'next_node_padding_mask': [],
-            'next_edge_mask': [],
-            'next_current_index': [],
-            'next_current_edge': [],
-            'next_edge_padding_mask': []
-        }
+        for i in range(15):
+            self.episode_buffer.append([])
 
     def save_observation(self, observation):
         node_inputs, node_padding_mask, edge_mask, current_index, current_edge, edge_padding_mask = observation
-        self.episode_buffer['node_inputs'].append(node_inputs)
-        self.episode_buffer['node_padding_mask'].append(node_padding_mask.bool())
-        self.episode_buffer['edge_mask'].append(edge_mask.bool())
-        self.episode_buffer['current_index'].append(current_index)
-        self.episode_buffer['current_edge'].append(current_edge)
-        self.episode_buffer['edge_padding_mask'].append(edge_padding_mask.bool())
+        self.episode_buffer[0] += node_inputs
+        self.episode_buffer[1] += node_padding_mask.bool()
+        self.episode_buffer[2] += edge_mask.bool()
+        self.episode_buffer[3] += current_index
+        self.episode_buffer[4] += current_edge
+        self.episode_buffer[5] += edge_padding_mask.bool()
 
-    def save_velocity(self, velocity):
-        self.episode_buffer['velocity'].append(velocity)
-
+    def save_action(self, action_index):
+        self.episode_buffer[6] += action_index
+        
+    def save_velocity(self, velocity_vector):
+        """保存速度向量到经验缓冲区"""
+        if not isinstance(velocity_vector, torch.Tensor):
+            velocity_vector = torch.tensor(velocity_vector, device=self.device)
+        self.episode_buffer[6] += velocity_vector.reshape(1, 2, 1)
+        
     def save_reward_done(self, reward, done):
-        self.episode_buffer['reward'].append(reward)
-        self.episode_buffer['done'].append(done)
+        self.episode_buffer[7] += torch.FloatTensor([reward]).reshape(1, 1, 1).to(self.device)
+        self.episode_buffer[8] += torch.tensor([int(done)]).reshape(1, 1, 1).to(self.device)
 
     def save_next_observations(self, observation):
         node_inputs, node_padding_mask, edge_mask, current_index, current_edge, edge_padding_mask = observation
@@ -93,9 +84,10 @@ class DualStageWorker:
         self.frams = []
         max_simulation_time = MAX_EPISODE_TIME
         step_count = 0
-        
+        save_exp = True
         self.robot.plot_env()
         self.env.plot_env(step_count)
+        next_waypoint = None
         while simulation_time < max_simulation_time and step_count < MAX_EPISODE_STEP and not done:
             reward, collision = self.env.step()
             # print(f"reward: {reward}, collision: {collision}, need_decision: {need_decision}")
@@ -103,7 +95,7 @@ class DualStageWorker:
             self.save_observation(observation)
             self.robot.update_planning_state_use_nearest_node(self.env.belief_info, self.env.robot_location)
             # select next waypoint
-            next_waypoint = None
+            
             if need_decision:
                 if self.env.random_wapoint:
                     success, next_waypoint = self.env.generate_random_waypoint()
@@ -117,11 +109,13 @@ class DualStageWorker:
                 print(f"path_points: {self.robot.path_points}")
                 # self.robot.update_waypoint([4, -4])
 
-            velocity, state = self.robot.cal_next_velocity(self.robot.path_points[self.robot.current_path_index])
-            
-            self.robot.update_robot_state(state[0], state[1], state[2], state[3])
-            # velocity = [1, 1]
-            self.robot.update_velocity(velocity)
+            # update velocity
+            print('next',next_waypoint)
+            self.robot.update_robot_state(next_waypoint)
+            state = self.robot.get_robot_state()
+            robot_local_belief = self.robot.get_robot_local_belief()
+            action = self.robot.get_local_action(state, robot_local_belief)
+            self.robot.update_velocity(action)
             # check arrive waypoint
             if self.robot.check_arrive_waypoint(self.robot.waypoint):
                 need_decision = True
@@ -156,5 +150,5 @@ if __name__ == "__main__":
     # model = (NODE_INPUT_DIM, EMBEDDING_DIM)
     # checkpoint = torch.load(model_path + '/checkpoint.pth', map_location='cpu')
     # model.load_state_dict(checkpoint['policy_model'])
-    worker = DualStageWorker(0, 22, save_image=True, random_wapoint=True, train_local_controller=True)
+    worker = DualStageWorker(0, 22, save_image=True, random_wapoint=True, train_local_controller=False)
     worker.run_episode()

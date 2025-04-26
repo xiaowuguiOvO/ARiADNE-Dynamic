@@ -104,7 +104,7 @@ class Env:
         self.robot_belief = sensor_work(self.robot_cell, round(self.sensor_range / self.cell_size), self.robot_belief,
                                         self.ground_truth)
         self.belief_info = MapInfo(self.robot_belief, self.belief_origin_x, self.belief_origin_y, self.cell_size)
-        obs = self.agent.get_robot_state()
+
         # reset
         self.agent.node_manager.reset()
         self.agent.update_nearest_node()
@@ -116,7 +116,8 @@ class Env:
         # random waypoint
         if self.random_wapoint:
             _, self.agent.waypoint = self.generate_random_waypoint()
-            
+        
+        obs = self.agent.get_observation()            
 
         return obs, {}
     
@@ -337,46 +338,18 @@ class Env:
 
     
     def calculate_reward(self):
-        "local controller reward"
-        reward = 0
-        
-        r_approach = 5
-        r_heading = 1
-        r_speed = 1
-        r_static = 0.01
-        r_smooth_linear = -0.1
-        r_smooth_angular = -1
-        # 这个smoth 的参数好像不对 加上去就寄了
-        
-        self.previous_distance_to_target = self.distance_to_target
-        self.distance_to_target = self.agent.distance_to_target
-        heading_diff = self.agent.heading_theta_diff
-        
-        current_v_linear = self.agent.v_linear
-        current_v_angular = self.agent.v_angular
-        # 计算速度变化 (需要确保 self.previous_v_linear/angular 在 step 中被正确更新)
-        delta_v_linear = abs(current_v_linear - getattr(self, 'previous_v_linear', current_v_linear)) # 使用 getattr 提供默认值以防首次调用
-        delta_v_angular = abs(current_v_angular - getattr(self, 'previous_v_angular', current_v_angular))
-        
-        approach_reward = r_approach * (self.previous_distance_to_target - self.distance_to_target)
-        heading_reward = r_heading * ((np.pi / 12) - abs(heading_diff))
-        # heading_reward = r_heading * np.cos(heading_diff) # 改用余弦奖励
-        # heading_reward = r_heading * np.cos(heading_diff) # 直接使用角度差的余弦值
-        speed_reward = r_speed * self.agent.v_linear
-        static_reward, self.ray_lines = self._get_static_obstacle_reward(torch.from_numpy(self.agent.updating_map_info.map))
-        static_reward = static_reward * r_static
-        linear_smooth_penalty = r_smooth_linear * delta_v_linear
-        angular_smooth_penalty = r_smooth_angular * delta_v_angular
-        # print(f"{approach_reward:.2f}, {heading_reward:.2f}, {speed_reward:.2f}, {static_reward:.2f}, {linear_smooth_penalty:.2f}, {angular_smooth_penalty:.2f}")
-        reward = approach_reward + heading_reward + speed_reward + static_reward
-        
-        # if self.agent.check_arrive_waypoint(self.agent.waypoint):
-            # print(f"reach waypoint, reward: {reward}")
-            # reward += REACH_WAYPOINT_REWARD
-        # if wall_collision:
-        #     reward -= WALL_COLLISION_PENALTY
-        self.previous_v_linear = current_v_linear
-        self.previous_v_angular = current_v_angular
+        "waypoint selector reward"
+        global_frontiers = get_frontier_in_map(self.belief_info)
+        if len(global_frontiers) == 0:
+            delta_num = len(self.global_frontiers)
+        else:
+            observed_frontiers = self.global_frontiers - global_frontiers
+            delta_num = len(observed_frontiers)
+
+        reward += delta_num / (SENSOR_RANGE * 3.14 // FRONTIER_CELL_SIZE)
+
+        self.global_frontiers = global_frontiers
+        self.old_belief = deepcopy(self.robot_belief)
         return reward
 
     def evaluate_exploration_rate(self):
@@ -562,14 +535,8 @@ class Env:
             terminated = True
             reward -= 100.0
         done = terminated or truncated
-        
-        obs = self.agent.get_robot_state()
-        if self.plot:
-            self.plot_env(self.step_count)
-            self.agent.plot_env(self.agent.waypoint)
-            if done:
-                make_gif(gifs_path, self.step_count, self.frame_files, self.explored_rate)
-                
+         
+        obs = self.agent.get_observation()
         return obs, reward, terminated, truncated, {}
     
 
