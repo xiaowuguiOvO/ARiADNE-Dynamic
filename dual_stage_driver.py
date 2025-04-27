@@ -7,7 +7,7 @@ import os
 import numpy as np
 import random
 
-from dual_stage_model import WaypointSelector, LocalController, WayPointQNet
+from dual_stage_model import WaypointSelector, WayPointQNet
 from runner import RLRunner
 from parameter import *
 
@@ -153,7 +153,6 @@ def main():
                     sample_indices = random.sample(indices, BATCH_SIZE)
                     rollouts = []
                     for i in range(len(experience_buffer)):
-                        # print(len(experience_buffer[i]), i)
                         rollouts.append([experience_buffer[i][index] for index in sample_indices])
                     
                     # 将批次数据堆叠为张量

@@ -8,10 +8,11 @@ gifs_path = f'gifs/{FOLDER_NAME}'
 SUMMARY_WINDOW = 32  # how many training steps before writing data to tensorboard
 LOAD_MODEL = False  # do you want to load the model trained before
 SAVE_IMG_GAP = 40  # how many episodes before saving a gif
+SAVE_IMG_GAP = 40  # how many episodes before saving a gif
 
 # map and planning resolution
-CELL_SIZE = 0.1  # meter, your map resolution
-NODE_RESOLUTION = 1  # meter, your node resolution
+CELL_SIZE = 0.4  # meter, your map resolution
+NODE_RESOLUTION = 4 # meter, your node resolution
 FRONTIER_CELL_SIZE = 2 * CELL_SIZE  # do you want to downsample the frontiers
 
 # map representation
@@ -24,8 +25,8 @@ SENSOR_RANGE = 16  # meter
 UTILITY_RANGE = 0.8 * SENSOR_RANGE  # consider frontiers within this range as observable
 MIN_UTILITY = 2  # ignore the utility if observable frontiers are less than this value
 
-# updating map range w.r.t the robot
-UPDATING_MAP_SIZE = 4 * SENSOR_RANGE + 4 * NODE_RESOLUTION  # nodes outside this range will not be affected by current measurements
+# updating map range w.r.t the robot , 这里指的是边长
+UPDATING_MAP_SIZE = SENSOR_RANGE * 2 + 1 * 2  # nodes outsi de this range will not be affected by current measurements
 
 # training parameters
 REPLAY_SIZE = 10000
@@ -33,7 +34,7 @@ MINIMUM_BUFFER_SIZE = 100
 BATCH_SIZE = 64
 LR = 1e-5
 GAMMA = 1
-NUM_META_AGENT = 16  # how many threads does your CPU have
+NUM_META_AGENT = 2  # how many threads does your CPU have
 
 # network parameters
 # NODE_INPUT_DIM = 4
@@ -85,7 +86,7 @@ SAVE_INTERVAL = 100  # 每隔多少轮保存一次模型
 
 ENTROPY_TARGET = -2.0  
 
-LOCAL_CONTROLLER_PATH = 'saved_models/best_model/actor_good.pth'
+LOCAL_CONTROLLER_PATH = 'ppo_best_model/ppo_avoid_col_4_21.zip'
 
 # randon相关
 RANDOM_DIST = 1 # 随机目标点距离
@@ -95,7 +96,7 @@ GROUND_TRUTH_FREE = 255
 GROUND_TRUTH_OCCUPIED = 1
 
 ROBOT_BELIEF_FREE = 255
-ROBOT_BELIEF_OCCUPIED = 0
+ROBOT_BELIEF_OCCUPIED = 1
 ROBOT_BELIEF_UNKNOWN = 127
 
 ROBOT_LOCAL_MAP_SIZE = 80

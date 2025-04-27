@@ -12,6 +12,10 @@ class NodeManager:
         self.plot = plot
         self.frontier = None
 
+    def reset(self):
+        self.nodes_dict = quads.QuadTree((0, 0), 1000, 1000)
+        self.frontier = None
+
     def check_node_exist_in_dict(self, coords):
         key = (coords[0], coords[1])
         exist = self.nodes_dict.find(key)
@@ -32,7 +36,7 @@ class NodeManager:
 
     def update_graph(self, robot_location, frontiers, updating_map_info, map_info):
         node_coords, _ = get_updating_node_coords(robot_location, updating_map_info)
-
+        
         if self.frontier is None:
             new_frontier = frontiers
 

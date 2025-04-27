@@ -1,21 +1,22 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from dual_stage_model import WaypointSelector, LocalController
+from dual_stage_model import WaypointSelector
 from parameter import *
 from node_manager import NodeManager
 import numpy as np
 from utils import *
 import matplotlib.pyplot as plt
+from stable_baselines3 import PPO
+
 class DualStageAgent:
     def __init__(self, device='cpu', LOAD_LOCAL_CONTROLLER=False):
         self.device = device
         self.waypoint_selector = WaypointSelector(node_dim=NODE_INPUT_DIM, embedding_dim=EMBEDDING_DIM)  
-        self.local_controller = LocalController()
         self.LOAD_LOCAL_CONTROLLER = LOAD_LOCAL_CONTROLLER
         if self.LOAD_LOCAL_CONTROLLER:
             self._load_local_controller()
-        self.location = None
+        self.location = [0, 0]
         self.map_info = None
         
         # map related parameters
@@ -52,11 +53,16 @@ class DualStageAgent:
         self.distance_to_target = 0.0
         self.heading_theta = 0.0
         self.heading_theta_diff = 0.0
+        # robot belief map
+        
+
+    
         self.belief_info = None
         self.local_belief_map = None
     def update_waypoint(self, waypoint):
         self.waypoint = waypoint
     
+    # load sb3 ppo local controller
     def update_local_belief_map(self):
         # 将机器人位置从实际坐标(米)转换为地图栅格坐标
         robot_cell = get_cell_position_from_coords(self.location, self.belief_info)
@@ -80,24 +86,47 @@ class DualStageAgent:
         self.local_belief_map = self.belief_info.map[min_y:max_y, min_x:max_x]
     
     def _load_local_controller(self):
-        # 先创建模型实例
-        self.local_controller = LocalController(state_dim=4, action_dim=2).to(self.device)
-        # 然后加载状态字典
-        state_dict = torch.load(LOCAL_CONTROLLER_PATH, map_location=self.device)
-        self.local_controller.load_state_dict(state_dict)
-        self.local_controller.eval()  # 设置为评估模式
+        try:
+            # 加载PPO模型
+            self.local_controller = PPO.load(LOCAL_CONTROLLER_PATH, device=self.device)
+            print(f"Successfully loaded SB3 PPO model from {LOCAL_CONTROLLER_PATH}")
+        except Exception as e:
+            print(f"Error loading SB3 model: {e}")
+            raise
+    # get local action from sb3 ppo local controller
+    def get_local_action(self, state, robot_belief):
+        if not hasattr(self, 'local_controller'):
+            raise RuntimeError("Local controller not loaded")
+        # 将状态转换为模型期望的格式
+        observation = {
+            "belief": robot_belief.astype(np.float32),
+            "robot_state": np.array(state, dtype=np.float32)
+        }
+        # 使用PPO模型预测动作
+        with torch.no_grad():
+            action, _ = self.local_controller.predict(observation, deterministic=True)
+        return action
     
     def get_robot_state(self):
         return [self.distance_to_target, self.heading_theta_diff, self.v_linear, self.v_angular]
     
-    def update_robot_state(self, distance_to_target, heading_theta_diff, v_linear, v_angular):
+    def get_robot_local_belief(self):
+        local_map = self.updating_map_info.map
+        local_map = self._process_belief_map(local_map)
+        return local_map
+    def _process_belief_map(self, belief_map):
+        # 把belief map 转成三通道
+        belief_map = np.stack((belief_map == ROBOT_BELIEF_FREE, belief_map == ROBOT_BELIEF_OCCUPIED, belief_map == ROBOT_BELIEF_UNKNOWN), axis=-1)
+        return belief_map
+    
+    def update_robot_state(self, waypoint):
+        distance_to_target = self.cal_dist_to_waypoint(waypoint)
+        heading_theta_diff = self.cal_heading_theta_diff_to_waypoint(waypoint)
         self.distance_to_target = distance_to_target
         self.heading_theta_diff = heading_theta_diff
-        self.v_linear = v_linear
-        self.v_angular = v_angular
+
     
     def check_arrive_waypoint(self, waypoint):
-        # print(f"waypoint distance: {self.cal_dist_to_waypoint(waypoint)}")
         if self.cal_dist_to_waypoint(waypoint) < WAYPOINT_THRESHOLD:
             return True
         else:
@@ -112,7 +141,8 @@ class DualStageAgent:
     def update_location(self, location):
         self.location = location
 
-    def get_updating_map(self, location):
+
+    def get_updating_map_old(self, location):
         # the map includes all nodes that may be updating
         updating_map_origin_x = (location[
                                   0] - self.updating_map_size / 2)
@@ -159,7 +189,65 @@ class DualStageAgent:
         updating_map_info = MapInfo(updating_map, updating_map_origin_x, updating_map_origin_y, self.cell_size)
 
         return updating_map_info
-    
+    def get_updating_map(self, location):
+        # the map includes all nodes that may be updating
+        robot_cell_x = round((location[0] + self.map_info.map_origin_x) / self.cell_size)
+        robot_cell_y = round((location[1] + self.map_info.map_origin_y) / self.cell_size)
+        
+        updating_map_origin_x = (location[0] - self.updating_map_size / 2)
+        updating_map_origin_y = (location[1] - self.updating_map_size / 2)
+        updating_map_top_x = updating_map_origin_x + self.updating_map_size
+        updating_map_top_y = updating_map_origin_y + self.updating_map_size
+
+        min_x = self.map_info.map_origin_x
+        min_y = self.map_info.map_origin_y
+        max_x = (self.map_info.map_origin_x + self.cell_size * (self.map_info.map.shape[1] - 1))
+        max_y = (self.map_info.map_origin_y + self.cell_size * (self.map_info.map.shape[0] - 1))
+
+        if updating_map_origin_x < min_x:
+            updating_map_origin_x = min_x
+        if updating_map_origin_y < min_y:
+            updating_map_origin_y = min_y
+        if updating_map_top_x > max_x:
+            updating_map_top_x = max_x
+        if updating_map_top_y > max_y:
+            updating_map_top_y = max_y
+
+        updating_map_origin_x = (updating_map_origin_x // self.cell_size + 1) * self.cell_size
+        updating_map_origin_y = (updating_map_origin_y // self.cell_size + 1) * self.cell_size
+        updating_map_top_x = (updating_map_top_x // self.cell_size) * self.cell_size
+        updating_map_top_y = (updating_map_top_y // self.cell_size) * self.cell_size
+
+        updating_map_origin_x = np.round(updating_map_origin_x, 1)
+        updating_map_origin_y = np.round(updating_map_origin_y, 1)
+        updating_map_top_x = np.round(updating_map_top_x, 1)
+        updating_map_top_y = np.round(updating_map_top_y, 1)
+
+        updating_map_origin = np.array([updating_map_origin_x, updating_map_origin_y])
+        updating_map_origin_in_global_map = get_cell_position_from_coords(updating_map_origin, self.map_info)
+
+        updating_map_top = np.array([updating_map_top_x, updating_map_top_y])
+        updating_map_top_in_global_map = get_cell_position_from_coords(updating_map_top, self.map_info)
+
+        # 创建固定大小的地图，用未知空间填充
+        map_pixels = int(self.updating_map_size / self.cell_size)
+        full_updating_map = np.ones((map_pixels, map_pixels), dtype=self.map_info.map.dtype) * ROBOT_BELIEF_UNKNOWN
+
+        # 获取实际地图部分
+        actual_map = self.map_info.map[
+                    updating_map_origin_in_global_map[1]:updating_map_top_in_global_map[1]+1,
+                    updating_map_origin_in_global_map[0]:updating_map_top_in_global_map[0]+1]
+
+        # 将实际地图部分复制到固定大小的地图中心
+        h, w = actual_map.shape
+        start_h = (map_pixels - h) // 2
+        start_w = (map_pixels - w) // 2
+        full_updating_map[start_h:start_h+h, start_w:start_w+w] = actual_map
+
+        updating_map_info = MapInfo(full_updating_map, updating_map_origin_x, updating_map_origin_y, self.cell_size)
+
+        return updating_map_info
+
     def update_nearest_node(self):
         """更新与当前位置最接近的节点"""
         if self.location is None:
@@ -208,13 +296,14 @@ class DualStageAgent:
             node.data.set_visited()
         self.node_coords, self.utility, self.guidepost, self.adjacent_matrix, self.current_index, self.neighbor_indices, self.obstacle_velocities = \
             self.update_observation()
+            
     def update_planning_state_use_nearest_node(self, global_map_info, location):
         self.update_map(global_map_info)
         # self.update_location(location)
         self.location = location
         self.update_nearest_node()
         nearest_node_location = np.array([self.nearest_node.x, self.nearest_node.y])
-        self.update_updating_map(nearest_node_location)
+        self.update_updating_map(nearest_node_location) # 更新局部地图，然后再更新前沿
         self.update_frontiers()
         self.node_manager.update_graph(nearest_node_location,
                                        self.frontier,
@@ -264,11 +353,19 @@ class DualStageAgent:
         utility = np.array(utility)
         guidepost = np.array(guidepost)
 
+        rounded_location = np.round(self.location).astype(int)
+
         # current_index = np.argwhere(node_coords_to_check == self.location[0] + self.location[1] * 1j)[0][0]
         if self.nearest_node is not None:
-            current_index = np.argwhere(node_coords_to_check == self.nearest_node.x + self.nearest_node.y * 1j)[0][0]
+            target_complex = self.nearest_node.x + self.nearest_node.y * 1j
+            # 使用距离计算找最近的节点
+            distances = np.abs(node_coords_to_check - target_complex)
+            current_index = np.argmin(distances)
         else:
-            current_index = np.argwhere(node_coords_to_check == self.location[0] + self.location[1] * 1j)[0][0]
+            rounded_location = np.round(self.location).astype(int)
+            target_complex = rounded_location[0] + rounded_location[1] * 1j
+            distances = np.abs(node_coords_to_check - target_complex)
+            current_index = np.argmin(distances)
         neighbor_indices = np.argwhere(adjacent_matrix[current_index] == 0).reshape(-1)
         return all_node_coords, utility, guidepost, adjacent_matrix, current_index, neighbor_indices, obstacle_velocities
 
@@ -333,25 +430,27 @@ class DualStageAgent:
         # self.next_waypoint_index = waypoint_index
         return next_waypoint, waypoint_index
     
-    def cal_next_velocity(self, waypoint):
-        distance_to_target = self.cal_dist_to_waypoint(waypoint)
-        heading_theta_diff = self.cal_heading_theta_diff_to_waypoint(waypoint)
-        state = np.array([distance_to_target, 
-                         heading_theta_diff,
-                         self.v_linear, 
-                         self.v_angular])
+        
+    # def cal_next_velocity(self, waypoint):
+    #     distance_to_target = self.cal_dist_to_waypoint(waypoint)
+    #     heading_theta_diff = self.cal_heading_theta_diff_to_waypoint(waypoint)
+    #     state = np.array([distance_to_target, 
+    #                      heading_theta_diff,
+    #                      self.v_linear, 
+    #                      self.v_angular])
                 
-        with torch.no_grad(): 
-            velocity = self.local_controller(torch.FloatTensor(state).to(self.device))
-        velocity = velocity.cpu().numpy()
-        return velocity, state
+    #     with torch.no_grad(): 
+    #         velocity = self.local_controller(torch.FloatTensor(state).to(self.device))
+    #     velocity = velocity.cpu().numpy()
+    #     return velocity, state
 
     def update_velocity(self, velocity):
         self.v_linear = velocity[0]
         self.v_angular = velocity[1]
     def cal_dist_to_waypoint(self, waypoint):
         # print(f"self.location: {self.location}, self.waypoint: {self.waypoint}")
-        return np.linalg.norm(self.location - waypoint)
+        return np.linalg.norm(np.array(self.location) - np.array(waypoint))
+
 
     def cal_heading_theta_to_waypoint(self, waypoint):
         return np.arctan2(waypoint[1] - self.location[1], waypoint[0] - self.location[0])
