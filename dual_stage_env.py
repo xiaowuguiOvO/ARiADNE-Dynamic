@@ -189,6 +189,7 @@ class Env:
 
         ground_truth = block_reduce(ground_truth, 2, np.min)
 
+        
         robot_cell = np.nonzero(ground_truth == 208)
         robot_cell = np.array([np.array(robot_cell)[1, 10], np.array(robot_cell)[0, 10]])
 
@@ -314,8 +315,7 @@ class Env:
             need_decision: 是否需要做新决策
         """
         done = False
-        if self.agent is None:
-            raise ValueError("必须先使用set_agent设置代理")
+        reward = 0
         
         linear_vel = self.agent.v_linear
         angular_vel = self.agent.v_angular
@@ -339,10 +339,15 @@ class Env:
         current_pos = self.robot_location.copy()
         next_pos = current_pos + cartesian_velocity * self.step_size
         
-        wall_collision = self.check_wall_collision(next_pos)
-        dynamic_collision = False
-        # print(f"wall_collision: {wall_collision}")
+        next_cell_x = np.round((next_pos[0] - self.belief_origin_x) / self.cell_size).astype(int)
+        next_cell_y = np.round((next_pos[1] - self.belief_origin_y) / self.cell_size).astype(int)
         
+        if (next_cell_x < 0 or next_cell_x >= self.robot_belief.shape[1] or next_cell_y < 0 or next_cell_y >= self.robot_belief.shape[0]):
+            wall_collision = True
+            done = True  # 如果要走出地图，直接结束回合
+            return reward, done
+        wall_collision = False
+
         # 保存原始控制命令用于记录
         self.velocity_command = velocity_command  # [linear, angular]
         # 保存转换后的笛卡尔速度用于其他计算
@@ -360,11 +365,12 @@ class Env:
         old_location = self.robot_location.copy()
         
         # 更新位置
-        # if not wall_collision:
-        #     self.robot_location = next_pos
-        # else:
-        #     self.robot_location = old_location - cartesian_velocity * self.step_size * 0.5
+        if not wall_collision:
+            self.robot_location = next_pos
+        else:
+            self.robot_location = old_location - cartesian_velocity * self.step_size * 0.5
             # print("collision, old belief: ", self.robot_belief[self.robot_cell[1], self.robot_cell[0]])
+        
         # 更新栅格位置
         self.robot_cell = np.round(
             np.array([(self.robot_location[0] - self.belief_origin_x) / self.cell_size,
@@ -374,23 +380,31 @@ class Env:
         # 更新移动距离
         moved_dist = np.linalg.norm(self.robot_location - old_location)
         total_dist += moved_dist
-        # 更新动态障碍物位置
-        self.update_dynamic_obstacles(self.step_size)
+        self.distance_since_last_decision += moved_dist
         
+        # 更新决策时间计数器
+        self.time_since_last_decision += self.step_size
+        
+        # 更新动态障碍物位置
+        # self.update_dynamic_obstacles(self.step_size)
+
         self.update_robot_belief()
-        self.agent.belief_info = self.belief_info
-        self.agent.update_local_belief_map()
+        
         # 累计总移动距离
         self.travel_dist += total_dist
+        
         # 评估探索率
         self.evaluate_exploration_rate()
+        
         # 计算奖励
-        reward = self.calculate_reward(total_dist, dynamic_collision, wall_collision)
+        reward = self.calculate_reward(total_dist, collision, wall_collision)
         self.total_reward += reward
-
-        if wall_collision:
-            done = True
-        return reward, dynamic_collision, wall_collision, done
+        # 重置决策计数器
+        if need_decision or collision:
+            self.distance_since_last_decision = 0.0
+            self.time_since_last_decision = 0.0
+        
+        return reward, done
             
     def plot_env(self, step):
         plt.subplot(1, 3, 1)

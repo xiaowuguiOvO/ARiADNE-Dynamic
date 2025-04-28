@@ -76,7 +76,7 @@ class DualStageWorker:
             self.env.plot_env(step_count)
         next_waypoint = None
         while simulation_time < max_simulation_time and step_count < MAX_EPISODE_STEP and not done:
-            reward, dynamic_collision, wall_collision, done = self.env.step()
+            reward, done = self.env.step()
             # print(f"reward: {reward}, collision: {collision}, need_decision: {need_decision}")
             observation = self.robot.get_observation()
             self.robot.update_planning_state_use_nearest_node(self.env.belief_info, self.env.robot_location)
@@ -132,5 +132,5 @@ if __name__ == "__main__":
     # model = (NODE_INPUT_DIM, EMBEDDING_DIM)
     # checkpoint = torch.load(model_path + '/checkpoint.pth', map_location='cpu')
     # model.load_state_dict(checkpoint['policy_model'])
-    worker = DualStageWorker(0, 22, save_image=True, random_wapoint=False, train_local_controller=False)
+    worker = DualStageWorker(0, 161, save_image=True, random_wapoint=False, train_local_controller=False)
     worker.run_episode()
