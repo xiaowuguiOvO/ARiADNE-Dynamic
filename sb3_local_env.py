@@ -47,7 +47,6 @@ class Env:
         # 动态障碍物相关
         self.dynamic_obstacles = []
         self.collision_count = 0
-        self.init_dynamic_obstacles()
 
         self.step_size = STEP_SIZE
         self.decision_interval = DECISION_INTERVAL
@@ -80,6 +79,9 @@ class Env:
         self.ray_lines = []
         self.previous_v_angular = 0.0
         self.previous_v_linear = 0.0
+        self.obstacle_init_position = []
+        self.init_dynamic_obstacles()
+
         
     def reset(self):
         # self.episode_index = np.random.randint(1, 5000)
@@ -93,6 +95,7 @@ class Env:
         self.belief_origin_x = -np.round(self.robot_cell[0] * self.cell_size, 1)   # meter
         self.belief_origin_y = -np.round(self.robot_cell[1] * self.cell_size, 1) 
         
+        self.init_dynamic_obstacles()
         self.robot_location = np.array([
         self.robot_cell[0] * self.cell_size + self.belief_origin_x,
         self.robot_cell[1] * self.cell_size + self.belief_origin_y
@@ -120,33 +123,37 @@ class Env:
 
     def init_dynamic_obstacles(self):
         """在自由空间中随机放置动态障碍物,每个障碍物在两点之间往返运动"""
+        self.dynamic_obstacles = []
         # 找出所有自由空间单元格
         free_cells = np.argwhere(self.ground_truth == FREE)
+        occupiyed_cells = np.argwhere(self.ground_truth == OCCUPIED)
+        unkown_cells = np.argwhere(self.ground_truth == UNKNOWN)
+        print(f"free cells: {len(free_cells)}, occupied cells: {len(occupiyed_cells)}, unknown cells: {len(unkown_cells)}")
         
         # 移除机器人附近的单元格
         robot_pos = np.array([self.robot_cell[1], self.robot_cell[0]])
         distances = np.linalg.norm(free_cells - robot_pos, axis=1)
         mask = distances > (SENSOR_RANGE / self.cell_size) * 0.3
-        free_cells = free_cells[mask]
+        # free_cells = free_cells[mask]
         
         # 如果没有足够的自由空间，减少障碍物数量
         obstacle_count = min(NUM_DYNAMIC_OBSTACLES, len(free_cells) // 20)
         
+        self.obstacle_circles_belief = []
         if len(free_cells) > 0:
             for i in range(obstacle_count):
                 # 为每个障碍物随机选择两个端点
                 valid_path = False
                 attempts = 0
-                while not valid_path and attempts < 50:  # 添加最大尝试次数
+                while not valid_path and attempts < 500:  # 添加最大尝试次数
                     attempts += 1
                     # 随机选择第一个点
                     idx1 = np.random.randint(len(free_cells))
                     y1, x1 = free_cells[idx1]
                     pos1 = np.array([
-                        x1 * self.cell_size + self.belief_origin_x,
-                        y1 * self.cell_size + self.belief_origin_y
+                        x1 * self.cell_size,
+                        y1 * self.cell_size
                     ])
-                    
                     # 随机选择轨迹距离
                     min_dist = np.random.uniform(OBSTACLE_CURVE_MIN_DIST, OBSTACLE_CURVE_MAX_DIST) / self.cell_size
                     max_dist = min_dist + 5.0 / self.cell_size  # 增加一个小范围以确保合理性
@@ -163,12 +170,13 @@ class Env:
                         # 随机选择一个有效的第二个点
                         y2, x2 = nearby_cells[np.random.randint(len(nearby_cells))]
                         pos2 = np.array([
-                            x2 * self.cell_size + self.belief_origin_x,
-                            y2 * self.cell_size + self.belief_origin_y
+                            x2 * self.cell_size,
+                            y2 * self.cell_size
                         ])
                         valid_path = True
                 
                 if valid_path:  # 只有找到有效路径才创建障碍物
+                    self.obstacle_init_position.append(pos1)
                     # 计算初始位置和速度
                     direction = pos2 - pos1
                     speed = np.random.uniform(MIN_OBSTACLE_SPEED, MAX_OBSTACLE_SPEED)  # 随机速度
@@ -177,6 +185,7 @@ class Env:
                     obstacle = {
                         'id': i,
                         'position': pos1.copy(),
+                        'cell_coord': np.array([x1, y1]),
                         'velocity': velocity,
                         'radius': OBSTACLE_RADIUS,
                         'waypoint1': pos1,
@@ -184,7 +193,9 @@ class Env:
                         'current_target': pos2,
                         'speed': speed
                     }
-                    
+                    x = obstacle['cell_coord'][0]
+                    y = obstacle['cell_coord'][1]
+                    print('inside', self.ground_truth[y, x])
                     self.dynamic_obstacles.append(obstacle)
 
     def check_path_valid(self, x1, y1, x2, y2):
@@ -329,8 +340,6 @@ class Env:
 
         return reward, rays
 
-
-    
     def calculate_reward(self):
         "local controller reward"
         reward = 0
@@ -513,7 +522,7 @@ class Env:
         self.agent.heading_theta_diff = self.agent.cal_heading_theta_diff_to_waypoint(self.agent.waypoint)
         
         # 更新移动距离
-        moved_dist = np.linalg.norm(self.robot_location - old_location)
+        moved_dist = np.linalg.norm(self.robot_location -  old_location)
         total_dist += moved_dist
         # 更新动态障碍物位置
         # self.update_dynamic_obstacles(self.step_size)
@@ -666,14 +675,59 @@ class Env:
             self.im_truth = self.ax_truth.imshow(self.ground_truth, cmap='gray', origin='lower')
             self.robot_point_truth, = self.ax_truth.plot([], [], 'mo', markersize=5, zorder=5)
             self.waypoint_point_truth = self.ax_truth.scatter([], [], c='blue', s=5, marker='*', zorder=5)  # 修正：在ax_truth上创建waypoint
+            self.obstacle_init_points = self.ax_truth.scatter([], [], c='green', s=5, marker='o', zorder=5)
+            
         else:
             # 更新ground truth
             self.im_truth.set_data(self.ground_truth)
+
         
-        # 更新机器人位置
-        robot_x = (self.robot_location[0] - self.belief_origin_x) / self.cell_size
-        robot_y = (self.robot_location[1] - self.belief_origin_y) / self.cell_size
-        self.robot_point_truth.set_data([robot_x], [robot_y])
+        # 添加动态障碍物渲染
+        # 清除之前的障碍物图形
+        if hasattr(self, 'obstacle_circles_belief'):
+            for circle in self.obstacle_circles_belief:
+                circle.remove() if circle in self.ax.patches else None
+        else:
+            self.obstacle_circles_belief = []
+        
+        # 绘制动态障碍物
+        self.obstacle_circles_belief = []
+        for obs in self.dynamic_obstacles:
+            # 转换障碍物位置到栅格坐标
+            # x = (obs['position'][0]) / self.cell_size
+            # y = (obs['position'][1]) / self.cell_size
+            x = obs['cell_coord'][0]
+            y = obs['cell_coord'][1]
+            # 检查 x y 是不是free
+            # 画出障碍物的圆形范围
+            circle = plt.Circle((x, y), OBSTACLE_RADIUS / self.cell_size,
+                            color='blue', alpha=0.7, zorder=4)
+            self.ax_truth.add_patch(circle)
+            self.obstacle_circles_belief.append(circle)
+            
+            # 绘制障碍物的运动路径
+            path_x = [(obs['waypoint1'][0]) / self.cell_size,
+                    (obs['waypoint2'][0]) / self.cell_size]
+            path_y = [(obs['waypoint1'][1]) / self.cell_size,
+                    (obs['waypoint2'][1]) / self.cell_size]
+            if not hasattr(self, 'obstacle_paths_belief'):
+                self.obstacle_paths_belief = []
+            
+            # 如果路径线已存在则更新，否则新建
+            path_found = False
+            for i, path in enumerate(self.obstacle_paths_belief):
+                if path[0] == obs['id']:
+                    path[1].set_data(path_x, path_y)
+                    path_found = True
+                    break
+            # 如果没有找到现有路径，创建一个新的
+            if not path_found:
+                path_line, = self.ax_truth.plot(path_x, path_y, 'r--', alpha=0.5, zorder=3)
+                self.obstacle_paths_belief.append([obs['id'], path_line])
+            # 更新机器人位置
+            robot_x = (self.robot_location[0] - self.belief_origin_x) / self.cell_size
+            robot_y = (self.robot_location[1] - self.belief_origin_y) / self.cell_size
+            self.robot_point_truth.set_data([robot_x], [robot_y])
 
         # 更新waypoint位置 - 使用相同的坐标转换方式
         if hasattr(self.agent, 'waypoint') and self.agent.waypoint is not None:
@@ -682,6 +736,18 @@ class Env:
             self.waypoint_point_truth.set_offsets([[waypoint_x, waypoint_y]])
         else:
             self.waypoint_point_truth.set_offsets(np.array([[]], dtype=float).reshape(0, 2))
+        
+    #    # 绘制障碍物初始位置点 - 修改此部分以使用正确的变量名
+    #     if hasattr(self, 'obstacle_init_position') and isinstance(self.obstacle_init_position, list) and len(self.obstacle_init_position) > 0:
+    #         init_positions = np.array(self.obstacle_init_position)
+    #         # 转换坐标到栅格坐标系
+    #         init_x = init_positions[:, 0] / self.cell_size
+    #         init_y = init_positions[:, 1] / self.cell_size
+    #         init_points = np.column_stack((init_x, init_y))
+    #         self.obstacle_init_points.set_offsets(init_points)
+    #     else:
+    #         self.obstacle_init_points.set_offsets(np.array([[]], dtype=float).reshape(0, 2))
+        
             
         self.ax_truth.axis('off')
 
@@ -822,13 +888,13 @@ class Env:
         #             (obs['waypoint2'][1] - self.belief_origin_y) / self.cell_size]
         #     plt.plot(path_x, path_y, 'r--', alpha=0.5, zorder=2)
         
-        # 在完整地图上，我们还可以绘制当前的目标点（waypoint）
+        # 当前的目标点（waypoint）
         if hasattr(self.agent, 'waypoint') and self.agent.waypoint is not None:
             waypoint_x = (self.agent.waypoint[0] - self.belief_origin_x) / self.cell_size
             waypoint_y = (self.agent.waypoint[1] - self.belief_origin_y) / self.cell_size
             plt.scatter(waypoint_x, waypoint_y, c='blue', s=50, marker='*', zorder=5)
         
-        # # 我们也可以显示机器人的朝向
+        # 机器人的朝向
         # if hasattr(self.agent, 'heading_theta'):
         #     robot_x = (self.robot_location[0] - self.belief_origin_x) / self.cell_size
         #     robot_y = (self.robot_location[1] - self.belief_origin_y) / self.cell_size

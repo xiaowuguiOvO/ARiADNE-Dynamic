@@ -114,7 +114,7 @@ def train_with_sb3():
                                              name_prefix='ppo_model')
 
     eval_callback = EvalCallback(eval_env, best_model_save_path='./ppo_best_model/',
-                                 log_path='./ppo_eval_logs/', eval_freq=10000    ,
+                                 log_path='./ppo_eval_logs/', eval_freq=10    ,
                                  deterministic=True, render=True, n_eval_episodes=1)
     # 训练
     total_timesteps = 1000000  # 
