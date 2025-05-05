@@ -54,7 +54,8 @@ class DualStageAgent:
         self.heading_theta = 0.0
         self.heading_theta_diff = 0.0
         # robot belief map
-        
+        # agent观测到的障碍物
+        self.dynamic_obstacles = []
 
     
     def update_waypoint(self, waypoint):
@@ -224,6 +225,9 @@ class DualStageAgent:
 
         return updating_map_info
 
+    def update_dynamic_obstacles(self, obs):
+        self.dynamic_obstacles = obs
+        
     def update_nearest_node(self):
         """更新与当前位置最接近的节点"""
         if self.location is None:

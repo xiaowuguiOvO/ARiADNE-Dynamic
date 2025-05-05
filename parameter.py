@@ -49,11 +49,10 @@ USE_GPU = False  # do you want to collect training data using GPUs (better not)
 USE_GPU_GLOBAL = True  # do you want to train the network using GPUs
 NUM_GPU = 0  # 0 unless you want to collect data using GPUs
 
-SPEED_SCALE = 10
 # 动态障碍物参数
 NUM_DYNAMIC_OBSTACLES = 10      # 动态障碍物数量
-MIN_OBSTACLE_SPEED = 0.5 * SPEED_SCALE      # 最小障碍物速度
-MAX_OBSTACLE_SPEED = 2 * SPEED_SCALE       # 最大障碍物速度
+MIN_OBSTACLE_SPEED = 0.5
+MAX_OBSTACLE_SPEED = 2
 OBSTACLE_RADIUS = 0.4          # 障碍物半径 (m)
 ROBOT_RADIUS = 0.3             # 机器人半径 (m)
 COLLISION_PENALTY = 0       # 碰撞惩罚

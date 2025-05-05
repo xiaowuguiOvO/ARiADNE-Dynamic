@@ -73,6 +73,7 @@ class DualStageEnvWrapper(gym.Env):
         # 用 action 控制机器人移动
         # print("action",action)
         # print("obs", self.env.agent.get_robot_state())
+        action = [1, 0]
         robot_state, reward, terminated, truncated, info = self.env.step(action)
         obs = self._process_obs(robot_state, self.env.agent.updating_map_info.map)
         return obs, reward, terminated, truncated, info

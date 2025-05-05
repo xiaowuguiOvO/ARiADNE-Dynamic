@@ -126,15 +126,12 @@ class Env:
         self.dynamic_obstacles = []
         # 找出所有自由空间单元格
         free_cells = np.argwhere(self.ground_truth == FREE)
-        occupiyed_cells = np.argwhere(self.ground_truth == OCCUPIED)
-        unkown_cells = np.argwhere(self.ground_truth == UNKNOWN)
-        print(f"free cells: {len(free_cells)}, occupied cells: {len(occupiyed_cells)}, unknown cells: {len(unkown_cells)}")
         
         # 移除机器人附近的单元格
         robot_pos = np.array([self.robot_cell[1], self.robot_cell[0]])
         distances = np.linalg.norm(free_cells - robot_pos, axis=1)
         mask = distances > (SENSOR_RANGE / self.cell_size) * 0.3
-        # free_cells = free_cells[mask]
+        free_cells = free_cells[mask]
         
         # 如果没有足够的自由空间，减少障碍物数量
         obstacle_count = min(NUM_DYNAMIC_OBSTACLES, len(free_cells) // 20)
@@ -193,9 +190,6 @@ class Env:
                         'current_target': pos2,
                         'speed': speed
                     }
-                    x = obstacle['cell_coord'][0]
-                    y = obstacle['cell_coord'][1]
-                    print('inside', self.ground_truth[y, x])
                     self.dynamic_obstacles.append(obstacle)
 
     def check_path_valid(self, x1, y1, x2, y2):
@@ -524,8 +518,11 @@ class Env:
         # 更新移动距离
         moved_dist = np.linalg.norm(self.robot_location -  old_location)
         total_dist += moved_dist
+        
         # 更新动态障碍物位置
-        # self.update_dynamic_obstacles(self.step_size)
+        self.update_dynamic_obstacles(self.step_size)
+        # agent 更新观测到的动态障碍物
+        self.agent.update_dynamic_obstacles(self.dynamic_obstacles)
         
         if self.check_wall_collision(self.robot_location):
             wall_collision = True
@@ -587,7 +584,6 @@ class Env:
             self.waypoint_point_updating = None
             self.heading_arrow_updating = None
             self.frontier_points_updating = None
-
     def _render_belief_map(self):
         """渲染左侧的belief map及其相关元素"""
         if not hasattr(self, 'im') or self.im is None:
@@ -600,6 +596,7 @@ class Env:
             self.info_text = self.ax.text(0.02, 1.05, '', transform=self.ax.transAxes)
             self.updating_map_rect = plt.Rectangle((0, 0), 1, 1, fill=False, color='green', linewidth=2, zorder=7)
             self.ax.add_patch(self.updating_map_rect)
+            self.obstacle_circles_belief_map = []  # 新增：保存belief map上的障碍物圆形标记
         else:
             # 更新belief map
             self.im.set_data(self.robot_belief)
@@ -637,20 +634,39 @@ class Env:
             self.frontier_points.set_color('red')
         else:
             self.frontier_points.set_offsets(np.array([[]], dtype=float).reshape(0, 2))
+        
+        # 清除之前的障碍物图形
+        if hasattr(self, 'obstacle_circles_belief_map'):
+            for circle in self.obstacle_circles_belief_map:
+                circle.remove() if circle in self.ax.patches else None
+        self.obstacle_circles_belief_map = []
+        
+        # 绘制动态障碍物 - 不再限制只在自由空间
+        for obs in self.dynamic_obstacles:
+            # 转换障碍物位置到栅格坐标
+            obs_x = (obs['position'][0]) / self.cell_size
+            obs_y = (obs['position'][1]) / self.cell_size
             
+            # 检查坐标是否在地图范围内
+            if (0 <= int(obs_y) < self.robot_belief.shape[0] and 
+                0 <= int(obs_x) < self.robot_belief.shape[1]):
+                # 只在已探索的自由空间(值为255)绘制障碍物
+                if self.robot_belief[int(obs_y), int(obs_x)] == ROBOT_BELIEF_FREE:
+                    circle = plt.Circle((obs_x, obs_y), OBSTACLE_RADIUS / self.cell_size,
+                                    color='blue', alpha=0.6, zorder=4)
+                    self.ax.add_patch(circle)
+                    self.obstacle_circles_belief_map.append(circle)
+        
+        
         if hasattr(self.agent, 'updating_map_size'):
             # 获取地图尺寸
             map_height, map_width = self.robot_belief.shape
             # 计算updating_map的大小（栅格单位）
             size_in_cells = int(self.agent.updating_map_size / self.cell_size)
-            # print(self.agent.updating_map_size, self.cell_size, size_in_cells)
             # 计算矩形框的位置，确保完全在地图范围内
             half_size = size_in_cells // 2
             rect_x = np.clip(robot_x - half_size, 0, map_width - size_in_cells)
             rect_y = np.clip(robot_y - half_size, 0, map_height - size_in_cells)
-            # 打印调试信息
-            # print(f"Map size: {map_width}x{map_height}, Robot pos: ({robot_x:.2f}, {robot_y:.2f})")
-            # print(f"Rect pos: ({rect_x:.2f}, {rect_y:.2f}), size: {size_in_cells}")
             # 更新矩形框
             self.updating_map_rect.set_xy((rect_x, rect_y))
             self.updating_map_rect.set_width(size_in_cells)
@@ -667,7 +683,7 @@ class Env:
             info_str = f'v_lin: {self.agent.v_linear:.2f}  v_ang: {self.agent.v_angular:.2f}  reward: {self.total_reward:.2f} step: {self.step_count} dis: {self.agent.distance_to_target:.2f} x: {self.robot_location[0]:.2f} y: {self.robot_location[1]:.2f} c_x: {self.robot_cell[0]} c_y: {self.robot_cell[1]}'
             self.info_text.set_text(info_str)
             self.ax.axis('off')
-
+            
     def _render_ground_truth(self):
         """渲染右侧的ground truth地图及其相关元素"""
         if not hasattr(self, 'im_truth') or self.im_truth is None:
@@ -686,7 +702,7 @@ class Env:
         # 清除之前的障碍物图形
         if hasattr(self, 'obstacle_circles_belief'):
             for circle in self.obstacle_circles_belief:
-                circle.remove() if circle in self.ax.patches else None
+                circle.remove() if circle in self.ax_truth.patches else None
         else:
             self.obstacle_circles_belief = []
         
@@ -694,10 +710,8 @@ class Env:
         self.obstacle_circles_belief = []
         for obs in self.dynamic_obstacles:
             # 转换障碍物位置到栅格坐标
-            # x = (obs['position'][0]) / self.cell_size
-            # y = (obs['position'][1]) / self.cell_size
-            x = obs['cell_coord'][0]
-            y = obs['cell_coord'][1]
+            x = (obs['position'][0]) / self.cell_size
+            y = (obs['position'][1]) / self.cell_size
             # 检查 x y 是不是free
             # 画出障碍物的圆形范围
             circle = plt.Circle((x, y), OBSTACLE_RADIUS / self.cell_size,
@@ -750,7 +764,7 @@ class Env:
         
             
         self.ax_truth.axis('off')
-
+        
     def _render_updating_belief_map(self):
         """渲染更新中的局部belief map"""
         # 检查agent和updating_map_info
@@ -763,7 +777,6 @@ class Env:
                 
             if not hasattr(self, 'im_updating') or self.im_updating is None:
                 # 初始化更新belief map的子图
-                # print(self.agent.updating_map_info.map)
                 self.im_updating = self.ax_updating.imshow(
                     self.agent.updating_map_info.map, 
                     cmap='gray', 
@@ -776,12 +789,13 @@ class Env:
                 self.heading_arrow_updating = self.ax_updating.quiver([], [], [], [], color='red', scale=20, zorder=6)
                 self.frontier_points_updating = self.ax_updating.scatter([], [], c='red', s=4, marker='.', zorder=4)
                 self.info_text_updating = self.ax_updating.text(0.02, 1.05, 'Updating Belief Map', transform=self.ax_updating.transAxes)
-                # self.ax_updating.set_title('Robot Updating Belief Map')
                 self.ray_lines_updating = []
+                self.obstacle_circles_updating = []  # 新增：保存updating map上的障碍物圆形标记
             else:
                 # 更新belief map
                 self.im_updating.set_data(self.agent.updating_map_info.map)
                 self.im_updating.set_clim(0, 255)
+                
             # 获取updating map的坐标原点和尺寸
             updating_origin_x = self.agent.updating_map_info.map_origin_x
             updating_origin_y = self.agent.updating_map_info.map_origin_y
@@ -790,6 +804,7 @@ class Env:
             robot_x = (self.robot_location[0] - updating_origin_x) / self.cell_size
             robot_y = (self.robot_location[1] - updating_origin_y) / self.cell_size
             self.robot_point_updating.set_data([robot_x], [robot_y])
+            
             # 更新朝向箭头
             if hasattr(self.agent, 'heading_theta'):
                 dx = np.cos(self.agent.heading_theta)
@@ -797,19 +812,6 @@ class Env:
                 self.heading_arrow_updating.set_offsets([[robot_x, robot_y]])
                 self.heading_arrow_updating.set_UVC(dx, dy)
             
-            # # 清除旧的射线
-            # for line in self.ray_lines_updating:
-            #     line.remove() if line in self.ax_updating.lines else None
-            # self.ray_lines_updating.clear()
-            # # 绘制新的射线
-            # for ray in self.ray_lines:
-            #     if ray:  # 确保射线不为空
-            #         ray_x = [point[0] for point in ray]
-            #         ray_y = [point[1] for point in ray]
-            #         # 绘制射线
-            #         line, = self.ax_updating.plot(ray_x, ray_y, 'r-', alpha=0.3, linewidth=0.5, zorder=3)
-            #         self.ray_lines_updating.append(line)
-                    
             # 更新waypoint位置
             if hasattr(self.agent, 'waypoint') and self.agent.waypoint is not None:
                 waypoint_x = (self.agent.waypoint[0] - updating_origin_x) / self.cell_size
@@ -818,17 +820,34 @@ class Env:
             else:
                 self.waypoint_point_updating.set_offsets(np.array([[]], dtype=float).reshape(0, 2))
             
-            # # 更新前沿点
-            # if hasattr(self.agent, 'frontier') and len(self.agent.frontier) > 0:
-            #     frontier_coords = np.array(list(self.agent.frontier))
-            #     frontier_x = (frontier_coords[:, 0] - updating_origin_x) / self.cell_size
-            #     frontier_y = (frontier_coords[:, 1] - updating_origin_y) / self.cell_size
-            #     frontier_points = np.column_stack((frontier_x, frontier_y))
-            #     self.frontier_points_updating.set_offsets(frontier_points)
-            #     self.frontier_points_updating.set_visible(True)
-            # else:
-            #     self.frontier_points_updating.set_offsets(np.array([[]], dtype=float).reshape(0, 2))
-                
+            # 清除之前的障碍物图形
+            if hasattr(self, 'obstacle_circles_updating'):
+                for circle in self.obstacle_circles_updating:
+                    circle.remove() if circle in self.ax_updating.patches else None
+            self.obstacle_circles_updating = []
+            
+            # 绘制动态障碍物 - 考虑地图原点偏移
+            for obs in self.dynamic_obstacles:
+                # 转换障碍物位置到updating map坐标系
+                # 注意：obs['position']是绝对坐标，需要减去地图原点偏移
+
+                # 或者等效的简化形式：
+                print(self.belief_origin_x, self.belief_origin_y)
+                obs_x = (obs['position'][0] + self.belief_origin_x - updating_origin_x) / self.cell_size
+                obs_y = (obs['position'][1] + self.belief_origin_y - updating_origin_y) / self.cell_size
+                obs_x_in_map = (obs['position'][0]) / self.cell_size
+                obs_y_in_map = (obs['position'][1]) / self.cell_size
+                # 检查坐标是否在updating map范围内
+                map_shape = self.agent.updating_map_info.map.shape
+                if (0 <= int(obs_y) < map_shape[0] and 0 <= int(obs_x) < map_shape[1]):
+                    # 绘制障碍物（所有障碍物都显示，不检查是否为自由空间）
+                    if self.robot_belief[int(obs_y_in_map), int(obs_x_in_map)] == ROBOT_BELIEF_FREE:
+                        # 画出障碍物的圆形范围
+                        circle = plt.Circle((obs_x, obs_y), OBSTACLE_RADIUS / self.cell_size,
+                                        color='blue', alpha=0.6, zorder=4)
+                        self.ax_updating.add_patch(circle)
+                        self.obstacle_circles_updating.append(circle)
+            
             self.ax_updating.axis('off')
             
         except Exception as e:
