@@ -12,6 +12,7 @@ from parameter import *
 import imageio
 from belief_cnn import BeliefFeatureExtractor
 import argparse
+
 print(f"SB3版本: {stable_baselines3.__version__}")
 
 class DualStageEnvWrapper(gym.Env):
@@ -73,7 +74,6 @@ class DualStageEnvWrapper(gym.Env):
         # 用 action 控制机器人移动
         # print("action",action)
         # print("obs", self.env.agent.get_robot_state())
-        action = [1, 0]
         robot_state, reward, terminated, truncated, info = self.env.step(action)
         obs = self._process_obs(robot_state, self.env.agent.updating_map_info.map)
         return obs, reward, terminated, truncated, info
@@ -115,8 +115,8 @@ def train_with_sb3():
                                              name_prefix='ppo_model')
 
     eval_callback = EvalCallback(eval_env, best_model_save_path='./ppo_best_model/',
-                                 log_path='./ppo_eval_logs/', eval_freq=10    ,
-                                 deterministic=True, render=True, n_eval_episodes=1)
+                                 log_path='./ppo_eval_logs/', eval_freq=2000    ,
+                                 deterministic=True, render=False, n_eval_episodes=1)
     # 训练
     total_timesteps = 1000000  # 
     model.learn(total_timesteps=total_timesteps, callback=[checkpoint_callback, eval_callback])

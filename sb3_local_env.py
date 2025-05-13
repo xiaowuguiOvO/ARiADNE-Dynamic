@@ -341,7 +341,7 @@ class Env:
         r_approach = 5
         r_heading = 1
         r_speed = 1
-        r_static = 0.01
+        r_static = 0.1
         r_smooth_linear = -0.1
         r_smooth_angular = -1
         # 这个smoth 的参数好像不对 加上去就寄了
@@ -832,7 +832,6 @@ class Env:
                 # 注意：obs['position']是绝对坐标，需要减去地图原点偏移
 
                 # 或者等效的简化形式：
-                print(self.belief_origin_x, self.belief_origin_y)
                 obs_x = (obs['position'][0] + self.belief_origin_x - updating_origin_x) / self.cell_size
                 obs_y = (obs['position'][1] + self.belief_origin_y - updating_origin_y) / self.cell_size
                 obs_x_in_map = (obs['position'][0]) / self.cell_size
