@@ -16,18 +16,9 @@ from parameter import *
 from io import BytesIO
 from PIL import Image
 import matplotlib.pyplot as plt
+import ray
+
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
-Experience = namedtuple('Experience',
-                        ['node_inputs', 'node_padding_mask', 'edge_mask', 'current_index',
-                         'current_edge', 'edge_padding_mask', 'waypoint_idx', 'reward',
-                         'next_node_inputs', 'next_node_padding_mask', 'next_edge_mask',
-                         'next_current_index', 'next_current_edge', 'next_edge_padding_mask',
-                         'done', 'robot_state', 'selected_waypoint', 'velocity'])
-
-
-
-
-
 class DualStageWorker:
     def __init__(self, meta_agent_id, global_step, device='cpu', save_image=False, random_wapoint=False, train_local_controller=True):
         self.meta_agent_id = meta_agent_id
@@ -85,7 +76,7 @@ class DualStageWorker:
             self.env.plot_env(step_count)
         next_waypoint = None
         while simulation_time < max_simulation_time and step_count < MAX_EPISODE_STEP and not done:
-            reward, collision = self.env.step()
+            reward, done = self.env.step()
             # print(f"reward: {reward}, collision: {collision}, need_decision: {need_decision}")
             observation = self.robot.get_observation()
             self.robot.update_planning_state_use_nearest_node(self.env.belief_info, self.env.robot_location)
@@ -130,7 +121,7 @@ class DualStageWorker:
             
         self.perf_metrics['travel_dist'] = self.env.travel_dist
         self.perf_metrics['explored_rate'] = self.env.explored_rate
-        self.perf_metrics['success_rate'] = 1 if done and not collision else 0
+        self.perf_metrics['success_rate'] = 1 if done else 0
         self.perf_metrics['collision_count'] = self.env.collision_count
         self.perf_metrics['simulation_time'] = simulation_time
         if self.save_image:
@@ -141,5 +132,5 @@ if __name__ == "__main__":
     # model = (NODE_INPUT_DIM, EMBEDDING_DIM)
     # checkpoint = torch.load(model_path + '/checkpoint.pth', map_location='cpu')
     # model.load_state_dict(checkpoint['policy_model'])
-    worker = DualStageWorker(0, 22, save_image=True, random_wapoint=False, train_local_controller=False)
+    worker = DualStageWorker(0, 161, save_image=True, random_wapoint=False, train_local_controller=False)
     worker.run_episode()

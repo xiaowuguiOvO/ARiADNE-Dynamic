@@ -180,6 +180,7 @@ class Env:
             # 打印位置变化，用于调试
             # print(f"障碍物{i} 从 {old_pos} 移动到 {obs['position']}, 移动了 {np.linalg.norm(obs['position']-old_pos):.4f}m")
 
+    
     def import_ground_truth(self, episode_index):
         map_dir = f'maps'
         map_list = os.listdir(map_dir)
@@ -188,6 +189,7 @@ class Env:
 
         ground_truth = block_reduce(ground_truth, 2, np.min)
 
+        
         robot_cell = np.nonzero(ground_truth == 208)
         robot_cell = np.array([np.array(robot_cell)[1, 10], np.array(robot_cell)[0, 10]])
 
@@ -247,22 +249,13 @@ class Env:
         return False
     
     def check_wall_collision(self, position):
-        """检查给定位置是否与墙壁碰撞，使用机器人的信念地图"""
+        """检查给定位置是否与墙壁碰撞，使用ground_truth"""
         # 确保位置是整数坐标
         x, y = np.round((position - np.array([self.belief_origin_x, self.belief_origin_y])) / self.cell_size).astype(int)
-        
         # 检查是否超出地图边界
-        if x < 0 or x >= self.robot_belief.shape[1] or y < 0 or y >= self.robot_belief.shape[0]:
+        if x < 0 or x >= self.ground_truth.shape[1] or y < 0 or y >= self.ground_truth.shape[0]:
             return True
-        
-        # 检查位置的值
-        value = self.robot_belief[y, x]
-        # print(value)
-        # robot_belief中：
-        # - 0: 障碍物
-        # - 127: 未探索区域
-        # - 255: 已探索的自由空间
-        return value != 0  # 如果是障碍物，则发生碰撞
+        return self.ground_truth[y, x] != GROUND_TRUTH_FREE
         
     def generate_random_waypoint(self):
         """
@@ -321,8 +314,8 @@ class Env:
             collision: 是否发生碰撞
             need_decision: 是否需要做新决策
         """
-        if self.agent is None:
-            raise ValueError("必须先使用set_agent设置代理")
+        done = False
+        reward = 0
         
         linear_vel = self.agent.v_linear
         angular_vel = self.agent.v_angular
@@ -349,14 +342,12 @@ class Env:
         next_cell_x = np.round((next_pos[0] - self.belief_origin_x) / self.cell_size).astype(int)
         next_cell_y = np.round((next_pos[1] - self.belief_origin_y) / self.cell_size).astype(int)
         
+        if (next_cell_x < 0 or next_cell_x >= self.robot_belief.shape[1] or next_cell_y < 0 or next_cell_y >= self.robot_belief.shape[0]):
+            wall_collision = True
+            done = True  # 如果要走出地图，直接结束回合
+            return reward, done
         wall_collision = False
-        if (next_cell_x < 0 or next_cell_x >= self.robot_belief.shape[1] or
-                next_cell_y < 0 or next_cell_y >= self.robot_belief.shape[0] or
-                self.robot_belief[next_cell_y, next_cell_x] != 255):  # 使用robot_belief检查障碍物
-                # 如果会碰到墙
-                # wall_collision = True
-                pass
-        
+
         # 保存原始控制命令用于记录
         self.velocity_command = velocity_command  # [linear, angular]
         # 保存转换后的笛卡尔速度用于其他计算
@@ -395,26 +386,8 @@ class Env:
         self.time_since_last_decision += self.step_size
         
         # 更新动态障碍物位置
-        self.update_dynamic_obstacles(self.step_size)
-        
-        # 检查碰撞
-        if self.check_collision():
-            collision = True
-            self.collision_count += 1
-            
-        # 检查是否需要新决策 - 如果机器人与Waypoint距离小于预制
-        # if self.agent.check_arrive_waypoint(self.agent.waypoint):
-        #     need_decision = True
-        
-        # need_decision = True
-        # if (self.distance_since_last_decision >= self.decision_distance or
-        #     self.time_since_last_decision >= self.decision_interval):
-        #     # need_decision = True
-        #     pass
-            
-            
-        # 更新机器人的信念地图（在一定间隔或碰撞时）
-        # if need_decision or collision:
+        # self.update_dynamic_obstacles(self.step_size)
+
         self.update_robot_belief()
         
         # 累计总移动距离
@@ -430,8 +403,8 @@ class Env:
         if need_decision or collision:
             self.distance_since_last_decision = 0.0
             self.time_since_last_decision = 0.0
-            
-        return reward, collision
+        
+        return reward, done
             
     def plot_env(self, step):
         plt.subplot(1, 3, 1)
