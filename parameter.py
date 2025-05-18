@@ -65,7 +65,7 @@ OBSTACLE_CURVE_MIN_DIST = 5  # 最小障碍物轨迹距离
 OBSTACLE_CURVE_MAX_DIST = 20  # 最大障碍物轨迹距离
 
 # 时间和频率控制
-MAX_EPISODE_STEP = 256 #512
+MAX_EPISODE_STEP = 512 #512
 MAX_EPISODE_TIME = 300.0         # 最大模拟时间(秒)
 STEP_SIZE = 0.2               # 仿真时间步长(秒)
 DECISION_INTERVAL = 0.1         # 决策间隔时间(秒)
@@ -77,7 +77,7 @@ VISUALIZATION_INTERVAL = 20     # 可视化帧间隔(步数)
 MAX_LINEAR_VELOCITY = 1
 MIN_LINEAR_VELOCITY = 0
 MAX_ANGULAR_VELOCITY = 1.0
-WAYPOINT_THRESHOLD = 0.5
+WAYPOINT_THRESHOLD = 3
 # 目标网络更新参数
 TARGET_UPDATE_INTERVAL = 10  # 每隔多少步更新一次目标网络
 TAU = 0.005  # 软更新比例
@@ -85,14 +85,14 @@ SAVE_INTERVAL = 100  # 每隔多少轮保存一次模型
 
 ENTROPY_TARGET = -2.0  
 
-LOCAL_CONTROLLER_PATH = 'ppo_best_model/ppo_avoid_col_4_21.zip'
+LOCAL_CONTROLLER_PATH = 'ppo_best_model\\518_ppo.zip'
 
 # randon相关
-RANDOM_MIN_DIST = 20
+RANDOM_MIN_DIST = 5
 RANDOM_MAX_DIST = 25 # 随机目标点距离
 REACH_WAYPOINT_REWARD = 100.0
 WALL_COLLISION_PENALTY = 100  # 墙壁碰撞惩罚
-
+STEP_PENALTY = 0.1
 # map相关
 GROUND_TRUTH_FREE = 255
 GROUND_TRUTH_OCCUPIED = 1

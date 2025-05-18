@@ -70,7 +70,7 @@ def evaluate_model():
         total_reward += reward
         done = terminated or truncated
         step += 1
-        sleep(0.05)  # 适当延时使得渲染更流畅
+        # sleep(0.05)  # 适当延时使得渲染更流畅
 
     print(f"评估完成，总步数：{step}，总回报：{total_reward}")
 

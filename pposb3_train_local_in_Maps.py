@@ -1,6 +1,5 @@
 import gymnasium as gym  # SB3 v2.4.1使用gymnasium而不是旧的gym
 import numpy as np
-from local_planner_env import LocalPlannerEnv
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback
 import os
@@ -115,8 +114,8 @@ def train_with_sb3():
                                              name_prefix='ppo_model')
 
     eval_callback = EvalCallback(eval_env, best_model_save_path='./ppo_best_model/',
-                                 log_path='./ppo_eval_logs/', eval_freq=2000    ,
-                                 deterministic=True, render=False, n_eval_episodes=1)
+                                 log_path='./ppo_eval_logs/', eval_freq=10000    ,
+                                 deterministic=True, render=True, n_eval_episodes=1)
     # 训练
     total_timesteps = 1000000  # 
     model.learn(total_timesteps=total_timesteps, callback=[checkpoint_callback, eval_callback])

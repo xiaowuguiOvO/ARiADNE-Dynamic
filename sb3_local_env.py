@@ -274,7 +274,7 @@ class Env:
         self.robot_belief = sensor_work(self.robot_cell, round(self.sensor_range / self.cell_size), self.robot_belief,
                                             self.ground_truth)
         
-    def _get_static_obstacle_reward(self, robot_belief, num_rays=30, fov_deg=240, step_size=1):
+    def _get_static_obstacle_reward(self, robot_belief, num_rays=30, fov_deg=120, step_size=1):
         """
         加速版：使用射线投射方式计算静态障碍物奖励
 
@@ -292,16 +292,16 @@ class Env:
         H, W = robot_belief.shape
         cx, cy = W // 2, H // 2
         max_radius = min(H, W) // 2
-        
+
         robot_heading = self.agent.heading_theta if hasattr(self.agent, 'heading_theta') else 0.0
         fov_rad = math.radians(fov_deg)
-        # start_angle = -fov_rad / 2
+        # start_angle = -fov_rad / 2 # 原始代码注释
         start_angle = robot_heading - fov_rad / 2
         angle_step = fov_rad / num_rays
 
         # 预计算角度单位向量
         directions = [(math.cos(start_angle + i * angle_step), math.sin(start_angle + i * angle_step))
-                    for i in range(num_rays)]
+                      for i in range(num_rays)]
 
         rays = []
         distances = []
@@ -314,26 +314,48 @@ class Env:
                 x = int(cx + dx * s * step_size)
                 y = int(cy + dy * s * step_size)
 
+                # 检查是否超出地图范围
                 if x < 0 or x >= W or y < 0 or y >= H:
+                    # 如果超出地图范围，记录到最大半径并停止当前射线
+                    distances.append(max_radius)
+                    hit = True # 标记为已处理
                     break
 
                 ray.append((x, y))
 
+                # 检查是否击中障碍物
                 if robot_belief[y, x] == ROBOT_BELIEF_OCCUPIED:
+                    # 击中障碍物，记录距离并停止当前射线
                     distances.append(s * step_size)
                     hit = True
                     break
 
+            # 如果内层循环完成但没有击中障碍物（即到达 max_radius 范围内且没有出界）
             if not hit:
-                distances.append(max_radius)
+                 # 在内层循环中，如果因为 s 达到 max_radius 而退出，
+                 # 并且没有因为出界或击中障碍物而 break，那么 hit 仍然是 False。
+                 # 此时需要记录 max_radius 作为距离。
+                 # 需要注意如果 max_radius 是 1，range(1, 1) 是空的，需要额外处理
+                 if max_radius == 1 and not hit:
+                      distances.append(max_radius)
+                 elif max_radius > 1 and s == max_radius - 1 and (x >= 0 and x < W and y >= 0 and y < H) and robot_belief[y, x] != ROBOT_BELIEF_OCCUPIED:
+                      distances.append(max_radius)
+
 
             rays.append(ray)
 
-        avg_dist = sum(distances) / len(distances)
-        reward = torch.log(torch.tensor(avg_dist, dtype=torch.float32, device=device).clamp(min=1e-6))
+        # 修改部分：按照NavRL论文的思路计算对数距离的平均值
+        # 1. 将距离列表转换为 Tensor
+        distances_tensor = torch.tensor(distances, dtype=torch.float32, device=device)
+        # 2. 对距离进行 Clamp 操作，确保取对数时输入大于0
+        clamped_distances = distances_tensor.clamp(min=1e-6)
+        # 3. 对每个距离取自然对数
+        log_distances = torch.log(clamped_distances)
+        # 4. 计算对数距离的平均值作为奖励
+        reward = torch.mean(log_distances)
 
         return reward, rays
-
+    
     def calculate_reward(self):
         "local controller reward"
         reward = 0
@@ -341,7 +363,7 @@ class Env:
         r_approach = 5
         r_heading = 1
         r_speed = 1
-        r_static = 0.1
+        r_static = 0.05
         r_smooth_linear = -0.1
         r_smooth_angular = -1
         # 这个smoth 的参数好像不对 加上去就寄了
@@ -366,8 +388,8 @@ class Env:
         linear_smooth_penalty = r_smooth_linear * delta_v_linear
         angular_smooth_penalty = r_smooth_angular * delta_v_angular
         # print(f"{approach_reward:.2f}, {heading_reward:.2f}, {speed_reward:.2f}, {static_reward:.2f}, {linear_smooth_penalty:.2f}, {angular_smooth_penalty:.2f}")
-        reward = approach_reward + heading_reward + speed_reward + static_reward
-        
+        reward = approach_reward + static_reward
+        print(f"static_reward: {static_reward}")
         self.previous_v_linear = current_v_linear
         self.previous_v_angular = current_v_angular
         return reward
@@ -512,6 +534,7 @@ class Env:
         ).astype(int)
         
         # 计算agent的状态  dis_to_target
+        # print(f"self.agent.waypoint: {self.agent.waypoint}")
         self.agent.distance_to_target = self.agent.cal_dist_to_waypoint(self.agent.waypoint)
         self.agent.heading_theta_diff = self.agent.cal_heading_theta_diff_to_waypoint(self.agent.waypoint)
         
@@ -549,7 +572,10 @@ class Env:
             reward -= WALL_COLLISION_PENALTY
         # check is arrive
         if self.agent.check_arrive_waypoint(self.agent.waypoint):
-            terminated = True
+            # terminated = True
+            # set next ramdom waypoint
+            success, waypoint = self.generate_random_waypoint()
+            self.agent.waypoint = waypoint  
             reward += REACH_WAYPOINT_REWARD
         
         self.step_count += 1

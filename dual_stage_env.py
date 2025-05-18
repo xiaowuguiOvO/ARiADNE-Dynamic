@@ -452,7 +452,7 @@ class Env:
         #               np.cos(self.agent.heading_theta), np.sin(self.agent.heading_theta),
         #               color='magenta', scale=20, zorder=6)
             
-        plt.suptitle('Explored: {:.4g}  Distance: {:.4g}  Collisions: {}  Linear: {:.2f} Angular: {:.2f} Total Reward: {:.2f} Heading: {:.2f} dis_to_waypoint: {:.2f} heading_diff: {:.2f}'.format(
+        plt.suptitle('Explored: {:.4g}  Distance: {:.4g}  Collisions: {}  Linear: {:.2f} Angular: {:.2f} Total Reward: {:.2f} Heading: {:.2f} dis_to_waypoint: {:.2f} heading_diff: {:.2f} step: {}'.format(
             self.explored_rate, 
             self.travel_dist, 
             self.collision_count,
@@ -461,7 +461,8 @@ class Env:
             self.total_reward,
             self.agent.heading_theta,
             self.agent.distance_to_target,
-            self.agent.heading_theta_diff
+            self.agent.heading_theta_diff,
+            step
         ))
         plt.tight_layout()
         plt.savefig('{}/{}_{}_samples.png'.format(gifs_path, self.episode_index, step), dpi=150)

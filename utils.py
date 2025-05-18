@@ -2,7 +2,7 @@ import numpy as np
 import imageio
 import os
 from skimage.morphology import label
-
+from PIL import Image
 from parameter import *
 
 
@@ -214,15 +214,42 @@ def check_collision(start, end, map_info):
 def make_gif(path, n, frame_files, rate, fps=10):
     # 计算每帧持续时间（秒）
     duration = 1.0 / fps
-    with imageio.get_writer('{}/{}_explored_rate_{:.4g}.gif'.format(path, n, rate), 
-                           mode='I', duration=duration) as writer:
-        for frame in frame_files:
+    
+    # 读取所有图像并确保它们具有相同的尺寸
+    images = []
+    first_size = None
+    
+    for frame in frame_files:
+        try:
             image = imageio.imread(frame)
-            writer.append_data(image)
-    print('gif exploration_rate: {:.4g} complete\n'.format(rate))
+            if first_size is None:
+                first_size = image.shape[:2]
+            elif image.shape[:2] != first_size:
+                # 调整图像大小以匹配第一帧
+                pil_image = Image.fromarray(image)
+                pil_image = pil_image.resize((first_size[1], first_size[0]), Image.LANCZOS)
+                image = np.array(pil_image)
+            images.append(image)
+        except Exception as e:
+            print(f"Warning: Failed to process image {frame}: {e}")
+    
+    try:
+        with imageio.get_writer('{}/{}_explored_rate_{:.4g}.gif'.format(path, n, rate), 
+                            mode='I', duration=duration) as writer:
+            for image in images:
+                writer.append_data(image)
+        print('gif exploration_rate: {:.4g} complete\n'.format(rate))
+    except Exception as e:
+        print(f"Error creating GIF: {e}")
+    
     # Remove files
-    for filename in frame_files[:-1]:
-        os.remove(filename)
+    try:
+        for filename in frame_files[:-1]:
+            os.remove(filename)
+    except Exception as e:
+        print(f"Warning: Could not remove temporary files: {e}")
+
+
 
 
 class MapInfo:

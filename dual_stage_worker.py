@@ -132,5 +132,5 @@ if __name__ == "__main__":
     # model = (NODE_INPUT_DIM, EMBEDDING_DIM)
     # checkpoint = torch.load(model_path + '/checkpoint.pth', map_location='cpu')
     # model.load_state_dict(checkpoint['policy_model'])
-    worker = DualStageWorker(0, 161, save_image=True, random_wapoint=False, train_local_controller=False)
+    worker = DualStageWorker(0, 110, save_image=True, random_wapoint=False, train_local_controller=False)
     worker.run_episode()
