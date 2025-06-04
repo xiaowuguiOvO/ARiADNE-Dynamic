@@ -34,7 +34,7 @@ MINIMUM_BUFFER_SIZE = 100
 BATCH_SIZE = 64
 LR = 1e-5
 GAMMA = 1
-NUM_META_AGENT = 2  # how many threads does your CPU have
+NUM_META_AGENT = 8  # how many threads does your CPU have
 
 # network parameters
 # NODE_INPUT_DIM = 4

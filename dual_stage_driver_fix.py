@@ -1,25 +1,26 @@
 import torch
 import torch.optim as optim
 import torch.nn as nn
-from torch.utils.tensorboard import SummaryWriter
+# from torch.utils.tensorboard import SummaryWriter
 import ray
 import os
 import numpy as np
 import random
-
-from model import PolicyNet, QNet
+import swanlab
+from dual_stage_model import WaypointSelector, WayPointQNet
 from runner import RLRunner
 from parameter import *
 
 ray.init()
 print("Welcome to RL autonomous exploration!")
 
-writer = SummaryWriter(train_path)
+# writer = SummaryWriter(train_path)
 if not os.path.exists(model_path):
     os.makedirs(model_path)
 if not os.path.exists(gifs_path):
     os.makedirs(gifs_path)
 
+swanlab.init(project='Ariadne-Dynamic')
 
 def main():
     # use GPU/CPU for driver/worker
@@ -27,14 +28,14 @@ def main():
     local_device = torch.device('cuda') if USE_GPU else torch.device('cpu')
 
     # initialize neural networks
-    global_policy_net = PolicyNet(NODE_INPUT_DIM, EMBEDDING_DIM).to(device)
-    global_q_net1 = QNet(NODE_INPUT_DIM, EMBEDDING_DIM).to(device)
-    global_q_net2 = QNet(NODE_INPUT_DIM, EMBEDDING_DIM).to(device)
+    global_policy_net = WaypointSelector(NODE_INPUT_DIM, EMBEDDING_DIM).to(device)
+    global_q_net1 = WayPointQNet(NODE_INPUT_DIM, EMBEDDING_DIM).to(device)
+    global_q_net2 = WayPointQNet(NODE_INPUT_DIM, EMBEDDING_DIM).to(device)
     log_alpha = torch.FloatTensor([-2]).to(device)
     log_alpha.requires_grad = True
 
-    global_target_q_net1 = QNet(NODE_INPUT_DIM, EMBEDDING_DIM).to(device)
-    global_target_q_net2 = QNet(NODE_INPUT_DIM, EMBEDDING_DIM).to(device)
+    global_target_q_net1 = WayPointQNet(NODE_INPUT_DIM, EMBEDDING_DIM).to(device)
+    global_target_q_net2 = WayPointQNet(NODE_INPUT_DIM, EMBEDDING_DIM).to(device)
 
     # initialize optimizers
     global_policy_optimizer = optim.Adam(global_policy_net.parameters(), lr=LR)
@@ -241,12 +242,29 @@ def main():
 
             # write record to tensorboard
             if len(training_data) >= SUMMARY_WINDOW:
-                write_to_tensor_board(writer, training_data, curr_episode)
+                # write_to_tensor_board(writer, training_data, curr_episode)
                 training_data = []
                 perf_metrics = {}
                 for n in metric_name:
                     perf_metrics[n] = []
-
+                    
+                swanlab.log({
+                    'loss/value': value_prime.mean().item(),
+                    'loss/policy_loss': policy_loss.item(),
+                    'loss/q_value_loss': (q1_loss + q2_loss).item(),
+                    'loss/entropy': entropy.mean().item(),
+                    'loss/policy_grad_norm': policy_grad_norm.item(),
+                    'loss/q_value_grad_norm': q_grad_norm.item(),
+                    'loss/log_alpha': log_alpha.item(),
+                    'loss/alpha_loss': alpha_loss.item(),
+                    'perf/reward': reward.mean().item(),
+                    'perf/travel_dist': np.nanmean(perf_metrics['travel_dist']),
+                    'perf/explored_rate': np.nanmean(perf_metrics['explored_rate']),
+                    'perf/success_rate': np.nanmean(perf_metrics['success_rate']),
+                    'perf/collision_count': np.nanmean(perf_metrics['collision_count']),
+                    'episode': curr_episode
+                })
+                
             # get the updated global weights
             weights_set = []
             if device != local_device:
