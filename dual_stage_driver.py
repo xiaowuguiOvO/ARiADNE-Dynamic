@@ -6,11 +6,11 @@ import ray
 import os
 import numpy as np
 import random
-
+import swanlab
 from dual_stage_model import WaypointSelector, WayPointQNet
 from runner import RLRunner
 from parameter import *
-
+from tqdm import tqdm
 writer = SummaryWriter(train_path)
 
 # 设置随机种子
@@ -21,6 +21,9 @@ def set_seed(seed):
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
+
+MAX_EPISODES = 10000
+episode_bar = tqdm(total=MAX_EPISODES, desc="Training Progress")
 
 # 主函数
 def main():
@@ -117,8 +120,11 @@ def main():
     
     # 收集数据并进行训练
     print("Starting training")
+    # swanlab init
+    swanlab.init(project='Ariadne-Dynamic')
+    
     try:
-        while True:
+        while curr_episode < MAX_EPISODES:
             # 等待任何作业完成
             done_id, job_list = ray.wait(job_list)
             # 获取结果
@@ -134,6 +140,7 @@ def main():
             
             # 启动新任务
             curr_episode += 1
+            episode_bar.update(1)
             job_list.append(meta_agents[info['id']].job.remote(weights_set, curr_episode))
             
             # 开始训练
@@ -248,13 +255,36 @@ def main():
                         entropy.mean().item(), policy_grad_norm.item(), q_grad_norm.item(), log_alpha.item(),
                         alpha_loss.item(), *perf_data]
                 training_data.append(data)
-                # write record to tensorboard
+                # # write record to tensorboard
                 if len(training_data) >= SUMMARY_WINDOW:
                     write_to_tensor_board(writer, training_data, curr_episode)
                     training_data = []
                     perf_metrics = {}
                     for n in metric_name:
                         perf_metrics[n] = []
+                episode_bar.set_postfix({
+                    'policy_loss': f"{policy_loss.item():.4f}",
+                    'q_loss': f"{(q1_loss.item() + q2_loss.item()):.4f}",
+                    'reward': f"{reward.mean().item():.2f}",
+                    'success': f"{np.nanmean(perf_metrics['success_rate']):.2f}"
+                })
+                # swanlab record
+                swanlab.log({
+                    'loss/value': value_prime.mean().item(),
+                    'loss/policy_loss': policy_loss.item(),
+                    'loss/q_value_loss': (q1_loss + q2_loss).item(),
+                    'loss/entropy': entropy.mean().item(),
+                    'loss/policy_grad_norm': policy_grad_norm.item(),
+                    'loss/q_value_grad_norm': q_grad_norm.item(),
+                    'loss/log_alpha': log_alpha.item(),
+                    'loss/alpha_loss': alpha_loss.item(),
+                    'perf/reward': reward.mean().item(),
+                    'perf/travel_dist': np.nanmean(perf_metrics['travel_dist']),
+                    'perf/explored_rate': np.nanmean(perf_metrics['explored_rate']),
+                    'perf/success_rate': np.nanmean(perf_metrics['success_rate']),
+                    'perf/collision_count': np.nanmean(perf_metrics['collision_count']),
+                    'episode': curr_episode
+                })
 
                 # 保存模型
                 if curr_episode % SAVE_INTERVAL == 0:
