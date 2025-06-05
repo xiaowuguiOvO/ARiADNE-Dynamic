@@ -75,8 +75,10 @@ class DualStageWorker:
         if self.save_image:
             self.env.plot_env(step_count)
         next_waypoint = None
+        reward_per_decision = 0.0
         while simulation_time < max_simulation_time and step_count < MAX_EPISODE_STEP and not done:
             reward, done = self.env.step()
+            reward_per_decision += reward
             # print(f"reward: {reward}, collision: {collision}, need_decision: {need_decision}")
             observation = self.robot.get_observation()
             self.robot.update_planning_state_use_nearest_node(self.env.belief_info, self.env.robot_location)
@@ -110,7 +112,8 @@ class DualStageWorker:
                 self.save_action(action_index)
                 next_observation = self.robot.get_observation()
                 self.save_next_observations(next_observation)
-                self.save_reward_done(reward, done)
+                self.save_reward_done(reward_per_decision, done)
+                reward_per_decision = 0.0
                 save_exp = False
             # 可视化
             step_count += 1
