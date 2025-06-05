@@ -7,11 +7,12 @@ import os
 import numpy as np
 import random
 import swanlab
-from dual_stage_model import WaypointSelector, WayPointQNet
+# from dual_stage_model import WaypointSelector, WayPointQNet
+from model import PolicyNet, QNet
 from runner import RLRunner
 from parameter import *
-
-ray.init()
+from tqdm import tqdm
+ray.init(num_cpus=NUM_META_AGENT, num_gpus=1)
 print("Welcome to RL autonomous exploration!")
 
 # writer = SummaryWriter(train_path)
@@ -19,23 +20,24 @@ if not os.path.exists(model_path):
     os.makedirs(model_path)
 if not os.path.exists(gifs_path):
     os.makedirs(gifs_path)
-
+    
+MAX_EPISODES = 100000
 swanlab.init(project='Ariadne-Dynamic')
-
+episode_bar = tqdm(total=MAX_EPISODES, desc="Training Progress")
 def main():
     # use GPU/CPU for driver/worker
     device = torch.device('cuda') if USE_GPU_GLOBAL else torch.device('cpu')
     local_device = torch.device('cuda') if USE_GPU else torch.device('cpu')
 
     # initialize neural networks
-    global_policy_net = WaypointSelector(NODE_INPUT_DIM, EMBEDDING_DIM).to(device)
-    global_q_net1 = WayPointQNet(NODE_INPUT_DIM, EMBEDDING_DIM).to(device)
-    global_q_net2 = WayPointQNet(NODE_INPUT_DIM, EMBEDDING_DIM).to(device)
+    global_policy_net = PolicyNet(NODE_INPUT_DIM, EMBEDDING_DIM).to(device)
+    global_q_net1 = QNet(NODE_INPUT_DIM, EMBEDDING_DIM).to(device)
+    global_q_net2 = QNet(NODE_INPUT_DIM, EMBEDDING_DIM).to(device)
     log_alpha = torch.FloatTensor([-2]).to(device)
     log_alpha.requires_grad = True
 
-    global_target_q_net1 = WayPointQNet(NODE_INPUT_DIM, EMBEDDING_DIM).to(device)
-    global_target_q_net2 = WayPointQNet(NODE_INPUT_DIM, EMBEDDING_DIM).to(device)
+    global_target_q_net1 = QNet(NODE_INPUT_DIM, EMBEDDING_DIM).to(device)
+    global_target_q_net2 = QNet(NODE_INPUT_DIM, EMBEDDING_DIM).to(device)
 
     # initialize optimizers
     global_policy_optimizer = optim.Adam(global_policy_net.parameters(), lr=LR)
@@ -113,7 +115,7 @@ def main():
 
     # collect data from worker and do training
     try:
-        while True:
+        while curr_episode < MAX_EPISODES:
             # wait for any job to be completed
             done_id, job_list = ray.wait(job_list)
             # get the results
@@ -129,6 +131,7 @@ def main():
 
             # launch new task
             curr_episode += 1
+            episode_bar.update(1)
             job_list.append(meta_agents[info['id']].job.remote(weights_set, curr_episode))
 
             # start training
@@ -202,6 +205,7 @@ def main():
                     mse_loss = nn.MSELoss()
 
                     q_values1 = dp_q_net1(*observation)
+                    # print(q_values1, action, q_values1.shape, action.shape)
                     q1 = torch.gather(q_values1, 1, action)
                     q1_loss = mse_loss(q1, target_q_batch.detach()).mean()
 
@@ -261,7 +265,7 @@ def main():
                     'perf/travel_dist': np.nanmean(perf_metrics['travel_dist']),
                     'perf/explored_rate': np.nanmean(perf_metrics['explored_rate']),
                     'perf/success_rate': np.nanmean(perf_metrics['success_rate']),
-                    'perf/collision_count': np.nanmean(perf_metrics['collision_count']),
+                    # 'perf/collision_count': np.nanmean(perf_metrics['collision_count']),
                     'episode': curr_episode
                 })
                 

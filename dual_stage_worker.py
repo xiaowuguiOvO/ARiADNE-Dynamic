@@ -46,7 +46,7 @@ class DualStageWorker:
         self.episode_buffer[5] += edge_padding_mask.bool()
 
     def save_action(self, action_index):
-        self.episode_buffer[6] += action_index
+        self.episode_buffer[6] += action_index.reshape(1, 1, 1)
         
     def save_reward_done(self, reward, done):
         self.episode_buffer[7] += torch.FloatTensor([reward]).reshape(1, 1, 1).to(self.device)

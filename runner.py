@@ -1,6 +1,7 @@
 import torch
 import ray
-from dual_stage_model import WaypointSelector
+# from dual_stage_model import WaypointSelector
+from model import PolicyNet
 from dual_stage_worker import DualStageWorker
 from parameter import *
 
@@ -9,7 +10,7 @@ class Runner(object):
     def __init__(self, meta_agent_id):
         self.meta_agent_id = meta_agent_id
         self.device = torch.device('cuda') if USE_GPU else torch.device('cpu')
-        self.local_network = WaypointSelector(NODE_INPUT_DIM, EMBEDDING_DIM)
+        self.local_network = PolicyNet(NODE_INPUT_DIM, EMBEDDING_DIM)
         self.local_network.to(self.device)
 
     def get_weights(self):
