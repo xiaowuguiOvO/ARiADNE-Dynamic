@@ -21,7 +21,7 @@ if not os.path.exists(model_path):
 if not os.path.exists(gifs_path):
     os.makedirs(gifs_path)
     
-MAX_EPISODES = 100000
+MAX_EPISODES = 10000
 swanlab.init(project='Ariadne-Dynamic')
 episode_bar = tqdm(total=MAX_EPISODES, desc="Training Progress")
 def main():

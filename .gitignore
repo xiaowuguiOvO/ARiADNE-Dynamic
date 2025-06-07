@@ -1,3 +1,7 @@
 gifs/ariadne1/
 saved_models
 ppo_checkpoints
+ppo_sb3_tensorboard
+ppo_eval_logs
+ppo_best_model
+saved_models

@@ -1,7 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from dual_stage_model import WaypointSelector
+# from dual_stage_model import WaypointSelector
+from model import PolicyNet
 from parameter import *
 from node_manager import NodeManager
 import numpy as np
@@ -12,7 +13,7 @@ from stable_baselines3 import PPO
 class DualStageAgent:
     def __init__(self, device='cpu', LOAD_LOCAL_CONTROLLER=False):
         self.device = device
-        self.waypoint_selector = WaypointSelector(node_dim=NODE_INPUT_DIM, embedding_dim=EMBEDDING_DIM)  
+        self.waypoint_selector = PolicyNet(node_dim=NODE_INPUT_DIM, embedding_dim=EMBEDDING_DIM)  
         self.LOAD_LOCAL_CONTROLLER = LOAD_LOCAL_CONTROLLER
         if self.LOAD_LOCAL_CONTROLLER:
             self._load_local_controller()
@@ -393,7 +394,10 @@ class DualStageAgent:
         node_inputs = np.concatenate((node_coords, node_utility, node_guidepost), axis=1)
         node_inputs = torch.FloatTensor(node_inputs).unsqueeze(0).to(self.device)
 
-        assert node_coords.shape[0] < NODE_PADDING_SIZE, print(node_coords.shape[0], NODE_PADDING_SIZE)
+        # if node too much, clip it to NODE_PADDING_SIZE
+        if n_node > NODE_PADDING_SIZE:
+            node_inputs = node_inputs[:NODE_PADDING_SIZE]
+            n_node = NODE_PADDING_SIZE
         padding = torch.nn.ZeroPad2d((0, 0, 0, NODE_PADDING_SIZE - n_node))
         node_inputs = padding(node_inputs)
 

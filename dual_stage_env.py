@@ -346,6 +346,11 @@ class Env:
             wall_collision = True
             done = True  # 如果要走出地图，直接结束回合
             return reward, done
+        
+        if self.agent.utility.sum() == 0:
+                done = True
+                reward += 20
+        
         wall_collision = False
 
         # 保存原始控制命令用于记录
